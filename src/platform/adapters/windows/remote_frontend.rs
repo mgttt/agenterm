@@ -3875,46 +3875,24 @@ impl RemoteWindowState {
                     continue;
                 }
             };
-            let text = if completed.requested.review {
-                match agenterm_platform::text_review::review_text(
-                    self.window.native_identity(),
-                    "Review terminal paste",
-                    "Review or edit the text before it is sent to the active terminal.",
-                    &text,
-                ) {
-                    Ok(Some(edited)) => {
-                        let edited = normalize_terminal_paste(&edited);
-                        if edited.is_empty() {
-                            self.last_error = Some(
-                                "Paste cancelled because the reviewed text is empty".to_owned(),
-                            );
-                            changed = true;
-                            continue;
-                        }
-                        if edited.len() > TERMINAL_PASTE_LIMIT_BYTES {
-                            self.last_error = Some(format!(
-                                "Paste cancelled because the reviewed text exceeds the {TERMINAL_PASTE_LIMIT_BYTES}-byte limit"
-                            ));
-                            changed = true;
-                            continue;
-                        }
-                        edited
-                    }
-                    Ok(None) => {
-                        self.last_error = None;
-                        self.last_message = Some("Terminal paste cancelled".to_owned());
-                        changed = true;
-                        continue;
-                    }
-                    Err(error) => {
-                        self.last_error = Some(format!("Paste review failed: {error}"));
-                        changed = true;
-                        continue;
-                    }
-                }
-            } else {
-                text
-            };
+            // The paste review gate is not wired up on this frontend. It used
+            // to call a blocking `review_text`, which no longer exists; the
+            // platform API is `agenterm_platform::text_review::open_review`,
+            // a *modeless* review that hands back a `TextReview` to poll from
+            // this loop instead of blocking inside it. Integrating it means
+            // holding the handle across iterations, which is more than this
+            // change should take on.
+            //
+            // Until then, refuse rather than degrade. Falling through with the
+            // unreviewed text would quietly drop a check the user explicitly
+            // asked for, and send it straight to a terminal.
+            if completed.requested.review {
+                self.last_error = Some(
+                    "Paste cancelled because review is not available on this frontend".to_owned(),
+                );
+                changed = true;
+                continue;
+            }
             let current = self.client.as_ref().is_some_and(|client| {
                 let snapshot = client.snapshot();
                 snapshot.server_epoch == completed.requested.server_epoch

@@ -207,25 +207,17 @@ fn run(mut args: impl Iterator<Item = String>) -> Result<(), RhError> {
         "eval" => {
             let path = require_path(&mut args, "eval")?;
             let source = read_source(&path)?;
-            check(&source)?;
-            let scratch = tempfile::tempdir().map_err(|err| RhError::Compile(err.to_string()))?;
-            let receipt = qualify_pack_dir(&source, scratch.path())?;
-            let native = scratch
-                .path()
-                .join(format!("pack.{}", agenterm_rh::compile::native_extension()));
-            // Registers the host callbacks first: this runs a real script, so
-            // `print` has to reach stdout and `rh::fail` has to be reported.
-            // `agenterm_rh::load_and_call_entry` runs hostless, which the pack
-            // prelude now refuses outright rather than fabricating values.
-            let (value, output) = crate::script_rh_host::call_pack_entry_capturing_output(&native)?;
-            print!("{output}");
+            // Evaluated by the interpreter. This used to build a native pack
+            // first, which meant `eval` could not run without a Rust toolchain
+            // and paid a compile before printing anything. The AOT pipeline is
+            // still here for `compile` / `pack` / `qualify` / task gates; it is
+            // just no longer on the path of "run this script once".
+            let value = eval_with_interpreter(&source, Vec::new())?;
             println!(
-                "rh eval ok: {} -> {}\n  source_hash={}\n  native_hash={}\n  cc_lines={}",
+                "rh eval ok: {} -> {}\n  source_hash={}",
                 path.display(),
-                value,
-                receipt.source_hash,
-                receipt.native_hash,
-                receipt.cc_line_count
+                value_display(&value),
+                agenterm_rh::hash_bytes(source.as_bytes())
             );
         }
         "run" => {
@@ -330,37 +322,90 @@ fn run_check_many_command(args: &mut impl Iterator<Item = String>) -> Result<u8,
 fn run_rh_script_command(args: &mut impl Iterator<Item = String>) -> Result<(), RhError> {
     let (path, project_root, script_args, budgets) = parse_run_cli(args)?;
     let source = read_source(&path)?;
-    let arguments = if script_args.is_empty() {
-        None
-    } else {
-        Some(serde_json::Value::Array(
-            script_args
-                .into_iter()
-                .map(serde_json::Value::String)
-                .collect(),
-        ))
-    };
-    let result = with_rh_backend(|| {
-        crate::script_backend::try_execute_rh_invocation(
-            crate::script_protocol::ScriptOperation::Run,
-            &source,
-            crate::script_backend::RhInvocationOptions {
-                project_root: Some(project_root),
-                arguments,
-                budgets,
-            },
-            None,
-        )
-    })?;
-    let Some(invocation) = result else {
-        return Err(RhError::Parse(
-            "agenterm-rh run requires the rh script backend".into(),
-        ));
-    };
-    if !invocation.stdout.is_empty() {
-        print!("{}", invocation.stdout);
+    // `run` executes through the interpreter. Project imports are still
+    // resolved the workbench way first, so a script that `require`s a sibling
+    // module keeps working.
+    let bundled = agenterm_rh::bundle_project_source(&project_root, &source)
+        .unwrap_or_else(|_| source.clone());
+    let value = eval_with_budgets(&bundled, script_args, budgets)?;
+    if value != agenterm_rh::Value::Unit {
+        println!("rh run ok: {} -> {}", path.display(), value_display(&value));
     }
     Ok(())
+}
+
+/// Run Language-1 source on the interpreter with the workbench host attached.
+///
+/// `print` goes straight to stdout here: this is the interactive CLI, not the
+/// worker protocol, so there is no JSON stream to corrupt.
+fn eval_with_interpreter(
+    source: &str,
+    script_args: Vec<String>,
+) -> Result<agenterm_rh::Value, RhError> {
+    eval_with_budgets(source, script_args, None)
+}
+
+/// As above, honouring the `run` budget flags.
+///
+/// `--max-operations` becomes engine fuel and `--timeout-ms` becomes its
+/// wall-clock deadline, so the flags keep meaning what they meant when a
+/// worker enforced them.
+fn eval_with_budgets(
+    source: &str,
+    script_args: Vec<String>,
+    budgets: Option<crate::script_protocol::ScriptBudgets>,
+) -> Result<agenterm_rh::Value, RhError> {
+    let budgets = budgets.unwrap_or_default();
+    let host = crate::script_rh_host::AgentermRhHost::new(script_args);
+    let mut engine = agenterm_rh::Engine::new_with_host(host).with_options(agenterm_rh::Options {
+        fuel: Some(budgets.operations),
+        wall_time: Some(std::time::Duration::from_millis(budgets.wall_time_ms)),
+        output_bytes: budgets.output_bytes,
+        call_depth: budgets.call_depth,
+        runtime_expression_depth: budgets.expression_depth,
+        ..agenterm_rh::Options::embedder()
+    });
+    engine
+        .eval(source)
+        .map_err(|error| rh_error_from_lang(&error))
+}
+
+/// Language errors carry more shape than the pipeline's `RhError`; keep the
+/// subset code, which scripts and gates match on.
+fn rh_error_from_lang(error: &agenterm_rh::Error) -> RhError {
+    match error {
+        agenterm_rh::Error::Parse(message) => RhError::Parse(message.clone()),
+        agenterm_rh::Error::Subset { code, detail } => RhError::Subset {
+            code,
+            detail: detail.clone(),
+        },
+        // `RhError::Runtime` already prints the `rh runtime:` prefix, so pass
+        // the detail alone rather than the language error's own rendering.
+        agenterm_rh::Error::Runtime(message) => RhError::Runtime(message.clone()),
+        agenterm_rh::Error::Host(message) => RhError::Runtime(format!("host: {message}")),
+        agenterm_rh::Error::Io(message) => RhError::Runtime(format!("io: {message}")),
+        agenterm_rh::Error::Unsupported { feature } => {
+            RhError::Runtime(format!("{feature} is unsupported"))
+        }
+        agenterm_rh::Error::OutOfFuel => {
+            RhError::Runtime("out of fuel (raise --max-operations)".to_owned())
+        }
+        agenterm_rh::Error::Timeout => {
+            RhError::Runtime("timed out (raise --timeout-ms)".to_owned())
+        }
+        agenterm_rh::Error::Cancelled => RhError::Runtime("cancelled".to_owned()),
+        other => RhError::Runtime(other.to_string()),
+    }
+}
+
+fn value_display(value: &agenterm_rh::Value) -> String {
+    match value {
+        agenterm_rh::Value::Unit => "()".to_owned(),
+        agenterm_rh::Value::Bool(inner) => inner.to_string(),
+        agenterm_rh::Value::Int(inner) => inner.to_string(),
+        agenterm_rh::Value::String(inner) => inner.clone(),
+        other => format!("{other:?}"),
+    }
 }
 
 fn parse_run_cli(
@@ -440,23 +485,6 @@ fn parse_run_cli(
     ))
 }
 
-fn with_rh_backend<T>(run: impl FnOnce() -> T) -> T {
-    let prior = std::env::var("AGENTERM_SCRIPT_BACKEND").ok();
-    unsafe {
-        std::env::set_var("AGENTERM_SCRIPT_BACKEND", "rh");
-    }
-    let output = run();
-    match prior {
-        Some(value) => unsafe {
-            std::env::set_var("AGENTERM_SCRIPT_BACKEND", value);
-        },
-        None => unsafe {
-            std::env::remove_var("AGENTERM_SCRIPT_BACKEND");
-        },
-    }
-    output
-}
-
 fn run_public_check_command(arguments: &[String]) -> Result<u8, RhError> {
     let Some(path) = arguments.first() else {
         return Err(RhError::Parse("usage: agenterm rh check <file>".into()));
@@ -530,6 +558,7 @@ fn public_check_failure(error: &RhError) -> (&str, &str) {
             .filter(|(code, _)| !code.is_empty())
             .unwrap_or(("rh_check", message)),
         RhError::Transpile(message) => ("rh_transpile", message),
+        RhError::Runtime(message) => ("rh_runtime", message),
     }
 }
 

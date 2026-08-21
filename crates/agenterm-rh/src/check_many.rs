@@ -52,6 +52,7 @@ fn check_failure(error: &RhError) -> CheckFailure {
             CheckFailure::new(code, detail.to_owned(), "script")
         }
         RhError::Transpile(message) => CheckFailure::new("rh_transpile", message.clone(), "script"),
+        RhError::Runtime(message) => CheckFailure::new("rh_runtime", message.clone(), "script"),
     }
 }
 

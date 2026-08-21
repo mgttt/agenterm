@@ -64,9 +64,9 @@ impl From<crate::RhError> for Error {
         match error {
             crate::RhError::Parse(message) => Self::Parse(message),
             crate::RhError::Subset { code, detail } => Self::Subset { code, detail },
-            crate::RhError::Transpile(message) | crate::RhError::Compile(message) => {
-                Self::Runtime(message)
-            }
+            crate::RhError::Transpile(message)
+            | crate::RhError::Compile(message)
+            | crate::RhError::Runtime(message) => Self::Runtime(message),
         }
     }
 }

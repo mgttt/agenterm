@@ -37,6 +37,9 @@ struct Run<'a> {
     limits: &'a Limits,
     fuel: u64,
     depth: usize,
+    /// Set only when a wall-clock budget applies, so the common case does not
+    /// pay for a clock read per node.
+    deadline: Option<std::time::Instant>,
 }
 
 /// A lexical frame: `Vec` rather than a map because Language-1 frames are
@@ -90,6 +93,9 @@ impl Backend for InterpBackend {
             limits,
             fuel: limits.fuel.unwrap_or(u64::MAX),
             depth: 0,
+            deadline: limits
+                .wall_time
+                .map(|budget| std::time::Instant::now() + budget),
         };
         let mut frame = Frame::default();
         for (name, value) in scope.entries() {
@@ -152,6 +158,11 @@ impl Run<'_> {
                 return Err(Error::OutOfFuel.into());
             }
             self.fuel -= 1;
+        }
+        if let Some(deadline) = self.deadline
+            && std::time::Instant::now() >= deadline
+        {
+            return Err(Error::Timeout.into());
         }
         Ok(())
     }

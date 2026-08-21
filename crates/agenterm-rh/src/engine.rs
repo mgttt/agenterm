@@ -177,6 +177,7 @@ impl Engine {
     fn run(&mut self, ir: &IrModule, scope: &mut Scope) -> Result<Value, Error> {
         let limits = Limits {
             fuel: self.options.fuel,
+            wall_time: self.options.wall_time,
             cancel: self.cancel.clone(),
         };
         self.backend.eval(ir, scope, self.host.as_mut(), &limits)

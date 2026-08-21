@@ -1327,3 +1327,160 @@ fn entry() { 42 }"#;
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Interpreter host
+// ---------------------------------------------------------------------------
+
+/// The workbench's `rh::Host`: Language-1 surfaces answered by `StdHost`, and
+/// AgenTerm's own surfaces answered here.
+///
+/// The language crate knows nothing about Fleet. It routes any dotted name it
+/// cannot resolve locally — `fleet.tabs.list` and friends — to `Host::call`,
+/// and this is where those land. That is the whole extension mechanism: the
+/// workbench adds capabilities by answering names, not by growing the trait.
+pub struct AgentermRhHost {
+    std_host: agenterm_rh::StdHost,
+    fleet: Option<FleetBridgeFn>,
+    /// When set, `print` accumulates here instead of going to stdout. The
+    /// worker protocol puts JSON on stdout, so a script printing there would
+    /// corrupt it.
+    captured: Option<String>,
+}
+
+impl AgentermRhHost {
+    pub fn new(args: Vec<String>) -> Self {
+        Self {
+            std_host: agenterm_rh::StdHost::new().with_args(args),
+            fleet: None,
+            captured: None,
+        }
+    }
+
+    #[must_use]
+    pub fn with_fleet(mut self, bridge: FleetBridgeFn) -> Self {
+        self.fleet = Some(bridge);
+        self
+    }
+
+    #[must_use]
+    pub fn capturing(mut self) -> Self {
+        self.captured = Some(String::new());
+        self
+    }
+
+    pub fn take_output(&mut self) -> String {
+        self.captured.take().unwrap_or_default()
+    }
+
+    /// `fleet.tabs.list` -> operation id `tabs.list` plus a JSON parameter
+    /// object, which is the shape the broker already speaks.
+    fn call_fleet(
+        &mut self,
+        name: &str,
+        args: &[agenterm_rh::Value],
+    ) -> Result<agenterm_rh::Value, agenterm_rh::Error> {
+        let Some(bridge) = self.fleet.as_ref() else {
+            return Err(agenterm_rh::Error::Host(format!(
+                "{name}: no fleet broker is attached to this run"
+            )));
+        };
+        let operation_id = name.strip_prefix("fleet.").unwrap_or(name);
+        let params = match args {
+            [] => serde_json::Value::Object(serde_json::Map::new()),
+            // A single map argument is already a parameter object.
+            [single @ agenterm_rh::Value::Map(_)] => value_to_json(single)?,
+            many => {
+                serde_json::Value::Array(many.iter().map(value_to_json).collect::<Result<_, _>>()?)
+            }
+        };
+        let response = bridge(operation_id, &params.to_string())
+            .map_err(|error| agenterm_rh::Error::Host(format!("{name}: {error}")))?;
+        let parsed: serde_json::Value = serde_json::from_str(&response)
+            .map_err(|error| agenterm_rh::Error::Host(format!("{name}: {error}")))?;
+        Ok(json_to_value(&parsed))
+    }
+}
+
+impl agenterm_rh::Host for AgentermRhHost {
+    fn print(&mut self, text: &str) -> Result<(), agenterm_rh::Error> {
+        match &mut self.captured {
+            Some(buffer) => {
+                buffer.push_str(text);
+                buffer.push('\n');
+            }
+            None => println!("{text}"),
+        }
+        Ok(())
+    }
+
+    fn args_len(&self) -> Result<i64, agenterm_rh::Error> {
+        self.std_host.args_len()
+    }
+
+    fn arg(&self, index: u32) -> Result<String, agenterm_rh::Error> {
+        self.std_host.arg(index)
+    }
+
+    fn call(
+        &mut self,
+        name: &str,
+        args: &[agenterm_rh::Value],
+    ) -> Result<agenterm_rh::Value, agenterm_rh::Error> {
+        if name.starts_with("fleet.") {
+            return self.call_fleet(name, args);
+        }
+        self.std_host.call(name, args)
+    }
+}
+
+fn value_to_json(value: &agenterm_rh::Value) -> Result<serde_json::Value, agenterm_rh::Error> {
+    use agenterm_rh::Value;
+    Ok(match value {
+        Value::Unit => serde_json::Value::Null,
+        Value::Bool(inner) => serde_json::Value::Bool(*inner),
+        Value::Int(inner) => serde_json::Value::Number((*inner).into()),
+        Value::String(inner) => serde_json::Value::String(inner.clone()),
+        Value::Bytes(bytes) => serde_json::Value::Array(
+            bytes
+                .iter()
+                .map(|byte| serde_json::Value::Number(i64::from(*byte).into()))
+                .collect(),
+        ),
+        Value::Array(items) => serde_json::Value::Array(
+            items
+                .iter()
+                .map(value_to_json)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        Value::Map(entries) => {
+            let mut map = serde_json::Map::new();
+            for (key, entry) in entries {
+                map.insert(key.clone(), value_to_json(entry)?);
+            }
+            serde_json::Value::Object(map)
+        }
+        Value::Host(object) => {
+            return Err(agenterm_rh::Error::Host(format!(
+                "cannot send host object {} across the fleet bridge",
+                object.type_id()
+            )));
+        }
+    })
+}
+
+fn json_to_value(json: &serde_json::Value) -> agenterm_rh::Value {
+    use agenterm_rh::Value;
+    match json {
+        serde_json::Value::Null => Value::Unit,
+        serde_json::Value::Bool(inner) => Value::Bool(*inner),
+        serde_json::Value::Number(inner) => Value::Int(inner.as_i64().unwrap_or(0)),
+        serde_json::Value::String(inner) => Value::String(inner.clone()),
+        serde_json::Value::Array(items) => Value::Array(items.iter().map(json_to_value).collect()),
+        serde_json::Value::Object(map) => Value::Map(
+            map.iter()
+                .map(|(key, entry)| (key.clone(), json_to_value(entry)))
+                .collect(),
+        ),
+    }
+}

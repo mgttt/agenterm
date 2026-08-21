@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use crate::host::Host;
 use crate::ir::IrModule;
@@ -70,6 +71,9 @@ impl Scope {
 #[derive(Clone, Debug)]
 pub(crate) struct Limits {
     pub(crate) fuel: Option<u64>,
+    /// Wall-clock budget. `None` means no deadline, which is the CLI default:
+    /// a shell tool walking a large tree is working, not running away.
+    pub(crate) wall_time: Option<Duration>,
     pub(crate) cancel: CancelHandle,
 }
 
@@ -121,6 +125,7 @@ mod tests {
     fn limits_are_constructible_crate_side() {
         let _ = Limits {
             fuel: Some(8),
+            wall_time: None,
             cancel: CancelHandle::default(),
         };
     }
