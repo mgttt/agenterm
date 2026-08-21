@@ -2637,6 +2637,13 @@ defined-memory bytes, but keep cloned imported-memory handles beside it because
 nested `RefCell` guards cannot safely borrow through a temporary outer guard.
 This preserves both lifetimes and imported object identity without `unsafe`.
 
+A shared funcref table semantically keeps its referenced function instance
+alive through the store, not through an embedding's public instance handle.
+Strong store ownership is safe only after binding-time handles back into that
+store are removed from live module state. Resolve them to numeric store-local
+slots first, clear the decoded binding handles, and test invocation after the
+public owner handle has been dropped.
+
 Treat extended WebAssembly constant expressions as small typed programs, not
 as a special case that reads one opcode and expects `end`. Evaluate them with a
 fallibly grown value stack, charge every instruction to the module decode

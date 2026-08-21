@@ -13,7 +13,7 @@
 
 use alloc::borrow::ToOwned;
 use alloc::collections::BTreeMap;
-use alloc::rc::{Rc, Weak};
+use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -135,8 +135,7 @@ pub struct Store {
 struct StoreState {
     next_instance_id: usize,
     tables: Vec<SharedTableState>,
-    instance_functions: Vec<Option<Vec<FuncType>>>,
-    instances: Vec<Option<Weak<RefCell<InstanceState>>>>,
+    instances: Vec<Option<Rc<RefCell<InstanceState>>>>,
 }
 
 struct SharedTableState {
@@ -149,7 +148,6 @@ impl Store {
             inner: Rc::new(RefCell::new(StoreState {
                 next_instance_id: 0,
                 tables: Vec::new(),
-                instance_functions: Vec::new(),
                 instances: Vec::new(),
             })),
         }
@@ -196,36 +194,11 @@ impl Store {
             .checked_add(1)
             .ok_or(WasmError::Trap("instance address space"))?;
         state
-            .instance_functions
-            .try_reserve(1)
-            .map_err(|_| WasmError::Trap("instance address space"))?;
-        state
             .instances
             .try_reserve(1)
             .map_err(|_| WasmError::Trap("instance address space"))?;
-        state.instance_functions.push(None);
         state.instances.push(None);
         Ok(id)
-    }
-
-    fn register_instance_functions(
-        &self,
-        instance_id: usize,
-        functions: Vec<FuncType>,
-    ) -> Result<(), WasmError> {
-        let mut state = self
-            .inner
-            .try_borrow_mut()
-            .map_err(|_| WasmError::Trap("store is already borrowed"))?;
-        let slot = state
-            .instance_functions
-            .get_mut(instance_id)
-            .ok_or(WasmError::Trap("unknown function instance"))?;
-        if slot.is_some() {
-            return Err(WasmError::Trap("duplicate function instance"));
-        }
-        *slot = Some(functions);
-        Ok(())
     }
 
     fn register_instance_state(
@@ -241,31 +214,38 @@ impl Store {
             .instances
             .get_mut(instance_id)
             .ok_or(WasmError::Trap("unknown function instance"))?;
-        *slot = Some(Rc::downgrade(instance));
+        if slot.is_some() {
+            return Err(WasmError::Trap("duplicate function instance"));
+        }
+        *slot = Some(instance.clone());
         Ok(())
     }
 
-    fn unregister_instance_functions(&self, instance_id: usize) {
+    fn unregister_instance(&self, instance_id: usize) {
         if let Ok(mut state) = self.inner.try_borrow_mut()
-            && let Some(slot) = state.instance_functions.get_mut(instance_id)
+            && let Some(slot) = state.instances.get_mut(instance_id)
         {
             *slot = None;
-            if let Some(slot) = state.instances.get_mut(instance_id) {
-                *slot = None;
-            }
         }
     }
 
     fn function_type(&self, address: &FunctionAddress) -> Result<FuncType, WasmError> {
-        self.inner
+        let instance = {
+            self.inner
+                .try_borrow()
+                .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
+                .instances
+                .get(address.instance_id)
+                .and_then(Option::as_ref)
+                .cloned()
+                .ok_or(WasmError::Trap("unknown function instance"))?
+        };
+        let function_type = instance
             .try_borrow()
-            .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
-            .instance_functions
-            .get(address.instance_id)
-            .and_then(Option::as_ref)
-            .and_then(|functions| functions.get(address.index))
-            .cloned()
-            .ok_or(WasmError::Trap("unknown function address"))
+            .map_err(|_| WasmError::Trap("instance is already mutably borrowed"))?
+            .module
+            .function_type(address.index)?;
+        Ok(function_type)
     }
 
     fn invoke_registered(
@@ -276,15 +256,16 @@ impl Store {
         base_depth: usize,
         stats: &mut CallResourceStats,
     ) -> Result<Vec<Val>, WasmError> {
-        let instance = self
-            .inner
-            .try_borrow()
-            .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
-            .instances
-            .get(address.instance_id)
-            .and_then(Option::as_ref)
-            .and_then(Weak::upgrade)
-            .ok_or(WasmError::Trap("unknown function instance"))?;
+        let instance = {
+            self.inner
+                .try_borrow()
+                .map_err(|_| WasmError::Trap("store is already mutably borrowed"))?
+                .instances
+                .get(address.instance_id)
+                .and_then(Option::as_ref)
+                .cloned()
+                .ok_or(WasmError::Trap("unknown function instance"))?
+        };
         let mut state = instance
             .try_borrow_mut()
             .map_err(|_| WasmError::Trap("instance is already borrowed"))?;
@@ -4530,22 +4511,6 @@ impl Module {
         })
     }
 
-    fn function_types(&self) -> Result<Vec<FuncType>, WasmError> {
-        let count = self
-            .hosts
-            .len()
-            .checked_add(self.funcs.len())
-            .ok_or(WasmError::Trap("function types"))?;
-        let mut functions = Vec::new();
-        functions
-            .try_reserve_exact(count)
-            .map_err(|_| WasmError::Trap("function types"))?;
-        for index in 0..count {
-            functions.push(self.function_type(index)?);
-        }
-        Ok(functions)
-    }
-
     fn indirect_target(
         &self,
         table_index: u32,
@@ -6188,15 +6153,18 @@ impl Module {
 }
 
 impl Instance {
-    fn new(module: Module) -> Result<Self, WasmError> {
-        let function_types = module.function_types()?;
+    fn new(mut module: Module) -> Result<Self, WasmError> {
         let globals = module.new_globals()?;
         let memories = module.new_memories(&globals)?;
         let data_live = module.new_data_state()?;
         let store = module.execution_store()?;
         let instance_id = store.allocate_instance_id()?;
         let (tables, elem_live) = module.new_table_state(&globals, &store, instance_id)?;
-        store.register_instance_functions(instance_id, function_types)?;
+        for table in &mut module.tables {
+            if table.imported {
+                table.import = None;
+            }
+        }
         let imported_memories = memories
             .iter()
             .map(|memory| match memory {
@@ -6265,7 +6233,7 @@ impl Instance {
             *last_peak_activation_slots = resources.peak_activation_slots;
             if let Err(error) = result {
                 drop(state);
-                instance.store.unregister_instance_functions(instance_id);
+                instance.store.unregister_instance(instance_id);
                 return Err(error);
             }
         }
@@ -6533,12 +6501,6 @@ impl Instance {
             .get_mut(index)
             .ok_or(WasmError::Trap("global index"))?
             .set(value)
-    }
-}
-
-impl Drop for Instance {
-    fn drop(&mut self) {
-        self.store.unregister_instance_functions(self.instance_id);
     }
 }
 

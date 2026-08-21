@@ -2671,3 +2671,24 @@ at 1,582,520 bytes arm64 and 1,667,320 bytes x86_64; profile-catalog, replay,
 private-library and session consumers link at 1,455,368, 1,446,296, 1,447,968
 and 1,447,120 bytes. Nostalgia Arcade consumes the result with 5 unit tests,
 1 UI test and an arm64 device build.
+
+## Seventy-sixth executable increment — store-owned instance lifetime
+
+`WasmStore` now strongly owns every successfully registered runtime record.
+Dropping the public `Instance` handle therefore does not invalidate function
+addresses already stored in a shared table: the imported-table oracle drops the
+second sibling after its counter reaches 2, then invokes through the first
+sibling and observes the second sibling's counter advance to 3.
+
+To make that ownership acyclic, instantiation resolves imported `WasmTable`
+handles into cycle-free live slots and then clears the decoded module's
+binding-only handles before registering the runtime record. Function signature
+lookup now reads the owning runtime module directly, removing the duplicate
+per-instance signature registry. Failed starts unregister the incomplete record;
+successful records live exactly as long as their store.
+
+The remaining imported-table execution hole is structural rather than semantic:
+foreign calls still cross a bounded native recursion bridge. The next increment
+must make owner switching an explicit state in the activation trampoline so
+cross-instance call cycles obey the same guest call-depth and activation-slot
+budgets without consuming native stack.

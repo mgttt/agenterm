@@ -77,6 +77,15 @@ fn wabt_compiled_imported_table_decodes_in_standard_index_space() {
         must_ok(second.invoke_by_name("run", &[]), "second indirect call").as_slice(),
         [Val::I32(2)]
     ));
+    drop(second);
+    assert!(matches!(
+        must_ok(
+            first.invoke_by_name("run", &[]),
+            "store-owned function after public handle drop"
+        )
+        .as_slice(),
+        [Val::I32(3)]
+    ));
     assert_eq!(
         must_ok(table.is_null(0), "host table visibility"),
         Some(false)
