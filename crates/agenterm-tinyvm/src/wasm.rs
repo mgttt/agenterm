@@ -172,7 +172,7 @@ pub fn eval_with(bytes: &[u8], limits: Limits) -> Result<Vec<Val>, WasmError> {
 /// No `Eq` derive: `F32Const` holds an `f32`, which is not `Eq` (float consts
 /// are stored raw so decoding a `.wasm` module never needs value comparison).
 #[cfg_attr(test, derive(Debug))]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 enum Op {
     I32Const(i32),
     I32Add,
@@ -464,7 +464,8 @@ enum Op {
     },
     /// `br_table` — pop an index; branch to `targets[index]` or `default`.
     BrTable {
-        targets: Vec<u32>,
+        target_start: u32,
+        target_len: u32,
         default: u32,
     },
     /// `if` — pop a condition; run the then-body when nonzero, else the
@@ -600,8 +601,14 @@ fn block_type(bytes: &[u8], i: usize) -> Result<(BlockType, usize), WasmError> {
     }
 }
 
-fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> {
+struct DecodedCode {
+    ops: Vec<Op>,
+    branch_targets: Vec<u32>,
+}
+
+fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmError> {
     let mut ops: Vec<Op> = Vec::new();
+    let mut branch_targets = Vec::new();
     let mut open: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < body.len() {
@@ -856,16 +863,20 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
                 let mut cur = n1;
                 let count = count as usize;
                 budget.charge(count)?;
-                let mut targets = Vec::new();
-                reserve_exact(&mut targets, count)?;
+                let target_start = branch_targets.len();
+                reserve_exact(&mut branch_targets, count)?;
                 for _ in 0..count {
                     let (t, ni) = leb_u32(body, cur)?;
                     cur = ni;
-                    targets.push(t);
+                    branch_targets.push(t);
                 }
                 let (default, ni) = leb_u32(body, cur)?;
                 i = ni;
-                ops.push(Op::BrTable { targets, default });
+                ops.push(Op::BrTable {
+                    target_start: target_start as u32,
+                    target_len: count as u32,
+                    default,
+                });
             }
             0x04 => {
                 let (ty, ni) = block_type(body, i)?;
@@ -1173,7 +1184,10 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<Vec<Op>, WasmError> 
     if !open.is_empty() {
         return Err(WasmError::Decode("unterminated block or loop"));
     }
-    Ok(ops)
+    Ok(DecodedCode {
+        ops,
+        branch_targets,
+    })
 }
 
 /// Take the first 4 bytes of a slice known to hold at least 4. Written as
@@ -1858,6 +1872,9 @@ struct Func {
     locals: Vec<Val>,
     arity: usize,
     code: Vec<Op>,
+    /// Guest-sized `br_table` target lists live outside [`Op`] so decoded
+    /// instructions stay cheap to copy during execution.
+    branch_targets: Vec<u32>,
     /// Index into [`Module::types`] for functions that came from a module's
     /// type section; `None` for functions registered through
     /// [`Module::add_function`], which carry counts only.
@@ -2062,13 +2079,17 @@ impl Module {
         result_arity: usize,
         body: &[u8],
     ) -> Result<usize, WasmError> {
-        let code = decode(body, &mut DecodeBudget::new())?;
+        let DecodedCode {
+            ops: code,
+            branch_targets,
+        } = decode(body, &mut DecodeBudget::new())?;
         let combined = self.hosts.len() + self.funcs.len();
         self.funcs.push(Func {
             n_params,
             locals: vec![Val::I32(0); n_locals],
             arity: result_arity,
             code,
+            branch_targets,
             sig: None,
         });
         Ok(combined)
@@ -2218,12 +2239,16 @@ impl Module {
         for (tidx, (locals, expr)) in func_types.into_iter().zip(codes) {
             let ft = types.get(tidx).ok_or(WasmError::Decode("function"))?;
             let (n_params, n_results) = (ft.params.len(), ft.results.len());
-            let code = decode(&expr, &mut budget)?;
+            let DecodedCode {
+                ops: code,
+                branch_targets,
+            } = decode(&expr, &mut budget)?;
             module.funcs.push(Func {
                 n_params,
                 locals,
                 arity: n_results,
                 code,
+                branch_targets,
                 sig: Some(tidx),
             });
         }
@@ -2343,7 +2368,7 @@ impl Module {
                 let mut locals = Vec::new();
                 locals.extend_from_slice(&ft.params);
                 locals.extend(f.locals.iter().map(valtype_of));
-                validate::validate_body(&ctx, &locals, &ft.results, &f.code)?;
+                validate::validate_body(&ctx, &locals, &ft.results, &f.code, &f.branch_targets)?;
             }
         }
 
@@ -2557,7 +2582,7 @@ impl Module {
         // linear memory and globals, so start-time host writes are visible.
         let mut steps: u64 = 0;
         let mut mem = self.new_memory()?;
-        let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
+        let mut globals = self.new_globals()?;
         let mut data_live = self.new_data_state()?;
         let (mut tables, mut elem_live) = self.new_table_state()?;
         let mut bulk = BulkState {
@@ -2646,15 +2671,9 @@ impl Module {
     /// shared across every nested `call`; it is discarded when the top-level
     /// invocation returns. Use [`Module::instantiate`] to retain state.
     pub fn invoke(&self, idx: usize, args: &[i32]) -> Result<Vec<i32>, WasmError> {
-        let vals: Vec<Val> = args.iter().map(|&a| Val::I32(a)).collect();
+        let vals = i32_args_to_vals(args)?;
         let results = self.invoke_val(idx, &vals)?;
-        results
-            .into_iter()
-            .map(|v| match v {
-                Val::I32(n) => Ok(n),
-                _other => Err(WasmError::Trap("invoke: expected i32 result, got")),
-            })
-            .collect()
+        vals_to_i32(results)
     }
 
     /// Invoke function `idx` with typed [`Val`] arguments, returning typed
@@ -2663,7 +2682,7 @@ impl Module {
     pub fn invoke_val(&self, idx: usize, args: &[Val]) -> Result<Vec<Val>, WasmError> {
         let mut steps: u64 = 0;
         let mut mem = self.new_memory()?;
-        let mut globals: Vec<Val> = self.globals.iter().map(|g| g.init).collect();
+        let mut globals = self.new_globals()?;
         let mut data_live = self.new_data_state()?;
         let (mut tables, mut elem_live) = self.new_table_state()?;
         let mut bulk = BulkState {
@@ -2717,6 +2736,15 @@ impl Module {
             }
         }
         Ok(mem)
+    }
+
+    fn new_globals(&self) -> Result<Vec<Val>, WasmError> {
+        let mut globals = Vec::new();
+        globals
+            .try_reserve_exact(self.globals.len())
+            .map_err(|_| WasmError::Trap("global state"))?;
+        globals.extend(self.globals.iter().map(|global| global.init));
+        Ok(globals)
     }
 
     /// Passive data starts live. Active data is implicitly dropped after its
@@ -2890,13 +2918,16 @@ impl Module {
             return Err(WasmError::Trap("host function"));
         }
         // Host functions use an i32 ABI: every arg/result must be i32.
-        let i32_args: Vec<i32> = args
-            .iter()
-            .map(|value| match value {
-                Val::I32(number) => Ok(*number),
-                _other => Err(WasmError::Trap("host function")),
-            })
-            .collect::<Result<_, _>>()?;
+        let mut i32_args = Vec::new();
+        i32_args
+            .try_reserve_exact(args.len())
+            .map_err(|_| WasmError::Trap("host arguments"))?;
+        for value in args {
+            match value {
+                Val::I32(number) => i32_args.push(*number),
+                _other => return Err(WasmError::Trap("host function")),
+            }
+        }
         if let Some(function_type) = host.sig.and_then(|signature| self.types.get(signature))
             && (function_type.params.iter().any(|&ty| ty != 0x7F)
                 || function_type.results.iter().any(|&ty| ty != 0x7F))
@@ -2907,7 +2938,12 @@ impl Module {
         if results.len() != host.n_results {
             return Err(WasmError::Trap("host function"));
         }
-        Ok(results.into_iter().map(Val::I32).collect())
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(results.len())
+            .map_err(|_| WasmError::Trap("host results"))?;
+        values.extend(results.into_iter().map(Val::I32));
+        Ok(values)
     }
 
     /// Dispatch a call by combined index to a host function or a defined one.
@@ -3084,10 +3120,17 @@ impl Module {
             if pc >= func.code.len() {
                 return finish_defined(&mut stack, func.arity);
             }
-            let op = func.code[pc].clone();
+            let op = func.code[pc];
             pc += 1;
             match op {
-                Op::I32Const(v) => stack.push(Val::I32(v)),
+                Op::I32Const(v) => {
+                    push_operand(
+                        &mut stack,
+                        Val::I32(v),
+                        live_slots,
+                        resources.available_slots,
+                    )?;
+                }
                 Op::I32Add => {
                     let b = pop(&mut stack)?;
                     let a = pop(&mut stack)?;
@@ -3198,7 +3241,7 @@ impl Module {
                     let v = *globals
                         .get(g as usize)
                         .ok_or(WasmError::Trap("global.get"))?;
-                    stack.push(v);
+                    push_operand(&mut stack, v, live_slots, resources.available_slots)?;
                 }
                 Op::GlobalSet(g) => {
                     let gi = g as usize;
@@ -3361,7 +3404,14 @@ impl Module {
                     let value = pop_i64(&mut stack)?;
                     stack.push(Val::I64(value as i32 as i64));
                 }
-                Op::F32Const(v) => stack.push(Val::F32(v)),
+                Op::F32Const(v) => {
+                    push_operand(
+                        &mut stack,
+                        Val::F32(v),
+                        live_slots,
+                        resources.available_slots,
+                    )?;
+                }
                 Op::F32Eq => bin_f32_cmp(&mut stack, |a, b| a == b)?,
                 Op::F32Ne => bin_f32_cmp(&mut stack, |a, b| a != b)?,
                 Op::F32Lt => bin_f32_cmp(&mut stack, |a, b| a < b)?,
@@ -3392,7 +3442,14 @@ impl Module {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
                     mem[ea..ea + 4].copy_from_slice(&value.to_le_bytes());
                 }
-                Op::F64Const(bits) => stack.push(Val::F64(f64::from_bits(bits))),
+                Op::F64Const(bits) => {
+                    push_operand(
+                        &mut stack,
+                        Val::F64(f64::from_bits(bits)),
+                        live_slots,
+                        resources.available_slots,
+                    )?;
+                }
                 Op::F64Eq => {
                     let b = pop_f64(&mut stack)?;
                     let a = pop_f64(&mut stack)?;
@@ -3496,7 +3553,14 @@ impl Module {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 8)?;
                     mem[ea..ea + 8].copy_from_slice(&value.to_le_bytes());
                 }
-                Op::MemorySize => stack.push(Val::I32((mem.len() / WASM_PAGE_SIZE) as i32)),
+                Op::MemorySize => {
+                    push_operand(
+                        &mut stack,
+                        Val::I32((mem.len() / WASM_PAGE_SIZE) as i32),
+                        live_slots,
+                        resources.available_slots,
+                    )?;
+                }
                 Op::MemoryGrow => {
                     let delta = pop(&mut stack)? as u32 as usize;
                     let old_pages = mem.len() / WASM_PAGE_SIZE;
@@ -3689,7 +3753,12 @@ impl Module {
                         .tables
                         .get(table_index as usize)
                         .ok_or(WasmError::Trap("table.size table index"))?;
-                    stack.push(Val::I32(table.len() as i32));
+                    push_operand(
+                        &mut stack,
+                        Val::I32(table.len() as i32),
+                        live_slots,
+                        resources.available_slots,
+                    )?;
                 }
                 Op::TableFill(table_index) => {
                     let len = pop(&mut stack)? as u32 as usize;
@@ -3773,7 +3842,14 @@ impl Module {
                     let ea = mem_ea(mem.len(), pop(&mut stack)?, offset, 4)?;
                     mem[ea..ea + 4].copy_from_slice(&(value as u32).to_le_bytes());
                 }
-                Op::I64Const(v) => stack.push(Val::I64(v)),
+                Op::I64Const(v) => {
+                    push_operand(
+                        &mut stack,
+                        Val::I64(v),
+                        live_slots,
+                        resources.available_slots,
+                    )?;
+                }
                 Op::I64Eqz => {
                     let a = pop_i64(&mut stack)?;
                     stack.push(Val::I32(i32::from(a == 0)));
@@ -3839,7 +3915,7 @@ impl Module {
                 })?,
                 Op::LocalGet(l) => {
                     let v = *locals.get(l as usize).ok_or(WasmError::Trap("local.get"))?;
-                    stack.push(v);
+                    push_operand(&mut stack, v, live_slots, resources.available_slots)?;
                 }
                 Op::LocalSet(l) => {
                     let v = pop_val(&mut stack)?;
@@ -3854,7 +3930,7 @@ impl Module {
                     if stack.len() < n {
                         return Err(WasmError::Trap("call"));
                     }
-                    let args = stack.split_off(stack.len() - n);
+                    let args = take_values(&mut stack, n, "call arguments")?;
                     return Ok(DefinedOutcome::Call {
                         index: combined,
                         args,
@@ -3877,7 +3953,7 @@ impl Module {
                     if stack.len() < n {
                         return Err(WasmError::Trap("call_indirect: stack has"));
                     }
-                    let args = stack.split_off(stack.len() - n);
+                    let args = take_values(&mut stack, n, "call arguments")?;
                     return Ok(DefinedOutcome::Call {
                         index: combined,
                         args,
@@ -3896,7 +3972,7 @@ impl Module {
                     if stack.len() < n {
                         return Err(WasmError::Trap("return_call"));
                     }
-                    let args = stack.split_off(stack.len() - n);
+                    let args = take_values(&mut stack, n, "call arguments")?;
                     return Ok(DefinedOutcome::TailCall {
                         index: combined,
                         args,
@@ -3912,13 +3988,19 @@ impl Module {
                     if stack.len() < n {
                         return Err(WasmError::Trap("return_call_indirect"));
                     }
-                    let args = stack.split_off(stack.len() - n);
+                    let args = take_values(&mut stack, n, "call arguments")?;
                     return Ok(DefinedOutcome::TailCall {
                         index: combined,
                         args,
                     });
                 }
                 Op::Block { ty, end } => {
+                    reserve_control_growth(
+                        &mut control,
+                        live_slots,
+                        resources.available_slots,
+                        true,
+                    )?;
                     let (params, results) = self.block_counts(ty)?;
                     let base = stack
                         .len()
@@ -3932,6 +4014,12 @@ impl Module {
                     });
                 }
                 Op::Loop { ty, .. } => {
+                    reserve_control_growth(
+                        &mut control,
+                        live_slots,
+                        resources.available_slots,
+                        true,
+                    )?;
                     let (params, _results) = self.block_counts(ty)?;
                     let base = stack
                         .len()
@@ -3959,7 +4047,16 @@ impl Module {
                         }
                     }
                 }
-                Op::BrTable { targets, default } => {
+                Op::BrTable {
+                    target_start,
+                    target_len,
+                    default,
+                } => {
+                    let target_start = target_start as usize;
+                    // Decoder-created offsets index the same private arena;
+                    // no public API can manufacture an inconsistent pair.
+                    let targets =
+                        &func.branch_targets[target_start..target_start + target_len as usize];
                     let idx = pop(&mut stack)? as u32 as usize;
                     let label = targets.get(idx).copied().unwrap_or(default);
                     pc = do_branch(&mut stack, &mut control, label)?;
@@ -3968,6 +4065,12 @@ impl Module {
                     }
                 }
                 Op::If { ty, else_pc, end } => {
+                    reserve_control_growth(
+                        &mut control,
+                        live_slots,
+                        resources.available_slots,
+                        false,
+                    )?;
                     let cond = pop(&mut stack)?;
                     let (params, results) = self.block_counts(ty)?;
                     let base = stack
@@ -4013,7 +4116,14 @@ impl Module {
                     let a = pop_val(&mut stack)?;
                     stack.push(if c != 0 { a } else { b });
                 }
-                Op::RefNull => stack.push(Val::FuncRef(None)),
+                Op::RefNull => {
+                    push_operand(
+                        &mut stack,
+                        Val::FuncRef(None),
+                        live_slots,
+                        resources.available_slots,
+                    )?;
+                }
                 Op::RefIsNull => {
                     let reference = pop_funcref(&mut stack)?;
                     stack.push(Val::I32(i32::from(reference.is_none())));
@@ -4023,7 +4133,12 @@ impl Module {
                     if function >= self.hosts.len() + self.funcs.len() {
                         return Err(WasmError::Trap("ref.func function index"));
                     }
-                    stack.push(Val::FuncRef(Some(function)));
+                    push_operand(
+                        &mut stack,
+                        Val::FuncRef(Some(function)),
+                        live_slots,
+                        resources.available_slots,
+                    )?;
                 }
                 Op::LocalTee(l) => {
                     let v = *stack
@@ -4049,7 +4164,7 @@ impl Module {
 impl Instance {
     fn new(module: Module) -> Result<Self, WasmError> {
         let memory = module.new_memory()?;
-        let globals = module.globals.iter().map(|global| global.init).collect();
+        let globals = module.new_globals()?;
         let data_live = module.new_data_state()?;
         let (tables, elem_live) = module.new_table_state()?;
         let mut instance = Self {
@@ -4108,14 +4223,8 @@ impl Instance {
     /// Invoke a function through the i32 convenience ABI while retaining
     /// instance state.
     pub fn invoke(&mut self, idx: usize, args: &[i32]) -> Result<Vec<i32>, WasmError> {
-        let vals: Vec<Val> = args.iter().map(|&arg| Val::I32(arg)).collect();
-        self.invoke_val(idx, &vals)?
-            .into_iter()
-            .map(|value| match value {
-                Val::I32(number) => Ok(number),
-                _other => Err(WasmError::Trap("invoke: expected i32 result, got")),
-            })
-            .collect()
+        let vals = i32_args_to_vals(args)?;
+        vals_to_i32(self.invoke_val(idx, &vals)?)
     }
 
     /// Invoke a function with typed values. The instruction counter starts at
@@ -4618,11 +4727,96 @@ fn pop_funcref(stack: &mut Vec<Val>) -> Result<Option<usize>, WasmError> {
     }
 }
 
+fn i32_args_to_vals(args: &[i32]) -> Result<Vec<Val>, WasmError> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(args.len())
+        .map_err(|_| WasmError::Trap("invoke arguments"))?;
+    values.extend(args.iter().copied().map(Val::I32));
+    Ok(values)
+}
+
+fn vals_to_i32(values: Vec<Val>) -> Result<Vec<i32>, WasmError> {
+    let mut integers = Vec::new();
+    integers
+        .try_reserve_exact(values.len())
+        .map_err(|_| WasmError::Trap("invoke results"))?;
+    for value in values {
+        match value {
+            Val::I32(number) => integers.push(number),
+            _other => return Err(WasmError::Trap("invoke: expected i32 result, got")),
+        }
+    }
+    Ok(integers)
+}
+
+/// Preflight the only instructions that grow the operand stack without first
+/// popping a value. This makes both the host live-slot ceiling and allocator
+/// refusal a typed trap before the instruction mutates guest state.
+fn push_operand(
+    stack: &mut Vec<Val>,
+    value: Val,
+    live_slots: usize,
+    available_slots: usize,
+) -> Result<(), WasmError> {
+    if stack.len() >= WASM_STACK_LIMIT {
+        return Err(WasmError::Trap("operand stack"));
+    }
+    // The dispatch loop already proved `live_slots <= available_slots`.
+    if live_slots >= available_slots {
+        return Err(WasmError::Trap("call stack"));
+    }
+    stack
+        .try_reserve(1)
+        .map_err(|_| WasmError::Trap("operand stack"))?;
+    stack.push(value);
+    Ok(())
+}
+
+fn reserve_control_growth(
+    control: &mut Vec<Frame>,
+    live_slots: usize,
+    available_slots: usize,
+    adds_live_slot: bool,
+) -> Result<(), WasmError> {
+    // The dispatch loop already proved the current count fits. Blocks and
+    // loops add one live slot; `if` consumes its condition before pushing the
+    // control frame and therefore remains count-neutral.
+    if adds_live_slot && live_slots >= available_slots {
+        return Err(WasmError::Trap("call stack"));
+    }
+    control
+        .try_reserve(1)
+        .map_err(|_| WasmError::Trap("control stack"))
+}
+
+/// Copy top values into a new call/result vector only after its complete
+/// bounded allocation succeeds. The source stack remains unchanged on
+/// allocator refusal.
+#[inline(never)]
+fn take_values(
+    stack: &mut Vec<Val>,
+    count: usize,
+    allocation_error: &'static str,
+) -> Result<Vec<Val>, WasmError> {
+    let start = stack
+        .len()
+        .checked_sub(count)
+        .ok_or(WasmError::Trap("result arity"))?;
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(count)
+        .map_err(|_| WasmError::Trap(allocation_error))?;
+    values.extend_from_slice(&stack[start..]);
+    stack.truncate(start);
+    Ok(values)
+}
+
 fn take_results(stack: &mut Vec<Val>, arity: usize) -> Result<Vec<Val>, WasmError> {
     if stack.len() < arity {
         return Err(WasmError::Trap("result arity"));
     }
-    Ok(stack.split_off(stack.len() - arity))
+    take_values(stack, arity, "function results")
 }
 
 fn finish_defined(stack: &mut Vec<Val>, arity: usize) -> Result<DefinedOutcome, WasmError> {
@@ -4643,9 +4837,9 @@ fn do_branch(stack: &mut Vec<Val>, control: &mut Vec<Frame>, l: u32) -> Result<u
     if stack.len() < frame.base + frame.branch_arity {
         return Err(WasmError::Trap("branch operand stack underflow"));
     }
-    let keep = stack.split_off(stack.len() - frame.branch_arity);
-    stack.truncate(frame.base);
-    stack.extend(keep);
+    let source = stack.len() - frame.branch_arity;
+    stack.copy_within(source.., frame.base);
+    stack.truncate(frame.base + frame.branch_arity);
     let new_len = if frame.is_loop { idx + 1 } else { idx };
     control.truncate(new_len);
     Ok(frame.cont)
@@ -5022,6 +5216,24 @@ mod tests {
         assert_eq!(m.invoke(f, &[0]).unwrap(), vec![10]);
         assert_eq!(m.invoke(f, &[1]).unwrap(), vec![20]);
         assert_eq!(m.invoke(f, &[7]).unwrap(), vec![30]);
+    }
+
+    #[test]
+    fn branch_value_preservation_reuses_the_operand_allocation() {
+        let mut stack = Vec::with_capacity(8);
+        stack.extend([Val::I32(10), Val::I32(99), Val::I32(20), Val::I32(30)]);
+        let capacity = stack.capacity();
+        let mut control = vec![Frame {
+            base: 1,
+            branch_arity: 2,
+            cont: 42,
+            is_loop: false,
+        }];
+
+        assert_eq!(do_branch(&mut stack, &mut control, 0), Ok(42));
+        assert_eq!(stack, [Val::I32(10), Val::I32(20), Val::I32(30)]);
+        assert_eq!(stack.capacity(), capacity);
+        assert!(control.is_empty());
     }
 
     // Family 4: narrow memory access + memory.size/grow.

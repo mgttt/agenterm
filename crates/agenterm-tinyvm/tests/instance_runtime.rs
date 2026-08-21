@@ -357,3 +357,35 @@ fn call_stack_limits_are_host_owned_and_fail_at_exact_boundaries() {
     ));
     assert_eq!(instance.last_peak_activation_slots(), 5);
 }
+
+#[test]
+fn operand_and_control_growth_are_preflighted_at_host_slot_boundary() {
+    let limits = Limits {
+        max_activation_slots: 1,
+        ..Limits::default()
+    };
+
+    let mut operand = WasmModule::new_with_limits(limits);
+    let function = must_ok(
+        operand.add_function(0, 0, 1, &[0x41, 0x2A, 0x0B]),
+        "add one-push function",
+    );
+    let mut operand = must_ok(operand.instantiate(), "instantiate one-push function");
+    assert!(matches!(
+        operand.invoke_val(function, &[]),
+        Err(WasmError::Trap("call stack"))
+    ));
+    assert_eq!(operand.last_peak_activation_slots(), 1);
+
+    let mut control = WasmModule::new_with_limits(limits);
+    let function = must_ok(
+        control.add_function(0, 0, 0, &[0x02, 0x40, 0x0B, 0x0B]),
+        "add nested-block function",
+    );
+    let mut control = must_ok(control.instantiate(), "instantiate nested-block function");
+    assert!(matches!(
+        control.invoke_val(function, &[]),
+        Err(WasmError::Trap("call stack"))
+    ));
+    assert_eq!(control.last_peak_activation_slots(), 1);
+}

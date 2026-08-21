@@ -100,6 +100,7 @@ struct V<'a> {
     m: &'a ModuleCtx<'a>,
     locals: &'a [u8],
     results: Types<'a>,
+    branch_targets: &'a [u32],
     stack: Vec<u8>,
     ctrl: Vec<Ctrl<'a>>,
 }
@@ -327,11 +328,13 @@ pub(super) fn validate_body(
     locals: &[u8],
     results: &[u8],
     code: &[Op],
+    branch_targets: &[u32],
 ) -> Result<(), WasmError> {
     let mut v = V {
         m,
         locals,
         results: Types::Slice(results),
+        branch_targets,
         stack: Vec::new(),
         ctrl: Vec::new(),
     };
@@ -780,7 +783,15 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.pop_types(types)?;
             v.push_types(types);
         }
-        BrTable { targets, default } => {
+        BrTable {
+            target_start,
+            target_len,
+            default,
+        } => {
+            let target_start = *target_start as usize;
+            // Both the offsets and this private arena are emitted by the same
+            // decoder; validation never accepts caller-constructed `Op`s.
+            let targets = &v.branch_targets[target_start..target_start + *target_len as usize];
             let want = v.label_types(*default)?;
             for t in targets {
                 if !v.label_types(*t)?.same(want) {

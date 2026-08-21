@@ -97,6 +97,15 @@ and control frames across the current function and suspended callers. Both
 debug and release artifacts enforce the same limits. Exceeding either bound is
 a typed runtime trap before another wide activation is allocated, while all
 executed call instructions remain charged to ordinary deterministic fuel.
+Net-positive operand/control growth is checked against those live limits and
+fallibly reserved before the instruction can mutate guest state. Moving call
+arguments or function results allocates the complete destination first, so an
+allocator refusal leaves the source activation intact before trapping. A
+decoded `br_table` borrows its range from a flat immutable per-function target
+arena (avoiding both hot-path clones and per-table secondary allocations), and branch
+result preservation uses overlap-safe movement inside the existing operand
+allocation; a loop cannot amplify memory by cloning its guest-declared table on
+every iteration.
 
 ## Required manifest custom section
 

@@ -633,7 +633,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 48] = [
+const LEAF_TESTS: [(&str, &str); 49] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -693,6 +693,10 @@ const LEAF_TESTS: [(&str, &str); 48] = [
     (
         "host-owned activation-slot ceiling",
         "call_stack_limits_are_host_owned_and_fail_at_exact_boundaries",
+    ),
+    (
+        "fallible execution-stack growth",
+        "operand_and_control_growth_are_preflighted_at_host_slot_boundary",
     ),
     ("start once", "instance_runs_start_exactly_once"),
     (
@@ -869,7 +873,8 @@ fn native_interpreter_boundary() {
 }
 
 /// The `<100KiB>` leaf is a measurement, not a grep: this builds the no_std
-/// static core, links it, strips it, and checks the size and the selftest.
+/// static core, links it with production dead-code elimination, strips it, and
+/// checks the size and the selftest.
 #[test]
 fn size_budget_script_gates_100kib() {
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

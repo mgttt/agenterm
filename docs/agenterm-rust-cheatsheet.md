@@ -2393,6 +2393,20 @@ the architecture in an unoptimized build at a depth that previously overflowed
 the native stack, including indirect recursion and a wide-locals amplification
 case—not merely a shallow factorial.
 
+For an interpreter, bounding activation count is not enough if instruction
+dispatch still hides infallible allocations. Preflight every instruction that
+can grow an operand/control stack without first popping, enforce the aggregate
+live-slot ceiling, then `try_reserve` before any guest mutation. Extract call
+arguments/results by reserving and copying the complete destination before
+truncating the source. Preserve branch values in place with overlap-safe copy;
+do not use `split_off` merely to unwind a stack. Finally, never clone a decoded
+instruction containing a guest-sized vector on the execution hot path:
+`br_table` targets belong in a flat immutable per-function arena, with decoded
+instructions holding ranges and borrowing them directly. This also avoids one
+secondary allocation per table at decode time.
+Prove the live-slot boundary through the public runtime and separately assert
+that branch preservation does not grow the operand vector's capacity.
+
 ## Separate deterministic fuel telemetry from device timing
 
 An instruction ceiling proves containment, but it does not reveal how close a

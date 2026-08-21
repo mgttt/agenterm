@@ -25,6 +25,7 @@ agenterm-tinyvm (35)
 │   ├── explicit guest call stack [x]
 │   │   ├── host-owned call-depth ceiling [x]
 │   │   └── host-owned activation-slot ceiling [x]
+│   │       └── fallible execution-stack growth [x]
 │   ├── memory budget       [x]
 │   ├── table budget        [x]
 │   ├── deterministic execution stats [x]
@@ -102,6 +103,11 @@ trampoline 替换当前 activation，长尾调用链不会消耗 Rust/iOS native
 512 activation 与 1,048,576 aggregate live-slot 上限约束，debug/release 行为一致。尾调用
 也能落到版本化 native import，但 imported table
 仍需跨 instance 的 store-level function identity 后才能合规共享。
+执行期的 operand/control 增长会先检查 live-slot/operand 上限并 `try_reserve`，然后才执行
+指令；call/tail-call 参数与函数结果先完整 fallible allocation，再从源 stack 移走。
+`br_table` targets 在 decode 时进入每函数的扁平、不可变 arena，执行指令只保存 range 并
+直接借用；branch value 通过原 stack 内 copy 保留，不会在循环热路径 clone guest-sized
+vector、触发二级分配或为每次分支建立临时 `Vec`。
 其它标准 proposal 必须逐项补齐解码、验证、执行、资源预算和独立引擎差分证据后进入
 compiler profile。
 核 strip `<100KiB`。

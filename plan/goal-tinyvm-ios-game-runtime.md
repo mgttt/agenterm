@@ -1686,3 +1686,42 @@ Evidence on 2026-08-21:
   remains below its gates at 1,553,000 bytes arm64 and 1,624,568 bytes x86_64.
   The stripped static core remains 87,720 bytes and its C self-test returns 42.
   Physical-device and Apple-review evidence remain open.
+
+## Forty-seventh executable increment — fallible execution-stack growth
+
+Guest execution no longer relies on hidden infallible allocations at the
+remaining stack and value-transfer boundaries. Instructions that grow the
+operand or control stack preflight the host-owned live-slot ceiling and reserve
+fallibly before mutating guest state. Defined/host calls, tail calls, public
+invoke conversion, fresh global state and function-result extraction allocate
+their complete destination before removing values from the source stack.
+Branch-result preservation now copies within the existing operand allocation.
+
+Decoded `br_table` target lists live in one flat immutable arena per function;
+an instruction carries only its arena range and default label. Validation and
+execution borrow that range, so a loop cannot clone a guest-sized vector and
+decode does not perform a secondary heap allocation for every table. The
+static-core measurement now asks the platform linker to apply the same
+dead-code elimination used by release consumers before stripping; the 100 KiB
+threshold and executable selftest remain unchanged.
+
+These are general VM containment rules. They do not introduce a TinyArcade
+opcode or game-engine boundary: tinyvm remains the standards-first,
+cross-platform WebAssembly VM, while games and future extensible applications
+remain versioned host embeddings over ordinary `.wasm` imports.
+
+Evidence on 2026-08-21:
+
+- Public black boxes prove exact host-slot failure for operand and control
+  growth before the rejected value/frame appears, and a unit test proves
+  branch-result preservation reuses the operand vector allocation.
+- All 221 non-ignored package tests plus one doctest pass under all features.
+  No-default/replay-only checks, all six explicit WABT/JavaScriptCore proposal
+  oracles, the two-game four-frame WebKit differential, all-target Clippy,
+  formatting, ShellCheck, document redaction and both iOS target checks pass.
+- Swift linkage remains below its gates at 1,552,856 bytes arm64 and 1,624,112
+  bytes x86_64; catalog/replay/private/session consumers are 1,425,688 /
+  1,400,120 / 1,418,304 / 1,417,456 bytes. The release-linked stripped static
+  core is 86,328 bytes and its C selftest returns 42.
+- Physical-device play, TestFlight and Apple-review evidence remain open; the
+  persistent goal therefore remains active.
