@@ -45,6 +45,7 @@ the guest sees a physical path, Unix fd, Windows HANDLE or iOS container path.
 | `fd_filestat_get` | `(i32, i32) → i32` | standard 64-byte filestat record from descriptor metadata |
 | `path_open` | `(i32, i32, i32, i32, i32, i64, i64, i32, i32) → i32` | relative open beneath a virtual preopen, returning a guest descriptor |
 | `path_unlink_file` | `(i32, i32, i32) → i32` | relative unlink beneath a virtual preopen |
+| `proc_exit` | `(i32) → ()` | backend exit notification followed by a non-returning VM interruption |
 
 Every present import is type-checked before instantiation. An unknown
 `wasi_snapshot_preview1` field or wrong signature fails binding; it is not left
@@ -60,9 +61,13 @@ Preview 1 rights return an explicit unsupported error rather than being
 silently ignored. UTF-8 and the common relative-path policy are checked before
 a backend sees the request.
 
+`proc_exit` never returns to guest code. After the backend accepts the code, the
+adapter interrupts execution with the exported `WASI_PROC_EXIT_TRAP` marker and
+retains the typed `u32` for `exit_code()` or consuming `take_exit_code()`.
+Backend rejection is a distinct trap and does not publish an exit code.
+
 ## Explicitly not implemented yet
 
-- `proc_exit` and its non-returning instance outcome;
 - sockets, polling, threads and ambient network access.
 
 An unimplemented import fails at bind time. Platform absence behind an
@@ -72,9 +77,11 @@ implemented import maps to an explicit WASI errno such as `NOSYS` or
 ## Current evidence
 
 `tests/wasi_p1_adapter.rs` builds standards-shaped binary modules with all
-fifteen implemented imports. Through real persistent tinyvm instances it verifies
+sixteen implemented imports. Through real persistent tinyvm instances it verifies
 argument/environment layouts, monotonic clock output, random bytes, preopen
 metadata/name, descriptor close, vectored I/O, seek and filestat layouts. Other
 cases reject an excessive iovec count before any backend write, an unknown field
 and a known field with the wrong standard type before instantiation. Path cases
 prove guest-fd publication and reject parent traversal before backend dispatch.
+A non-returning case proves the backend receives code 7, the adapter exposes the
+same typed value and guest instructions following `proc_exit` do not execute.

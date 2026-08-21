@@ -2715,3 +2715,9 @@ unknown or unsupported lookup, open, descriptor and inheriting-right bits
 explicitly; silently dropping one can grant broader access or make cross-host
 behavior diverge. Validate the result slot, UTF-8 and relative preopen path
 before opening a native handle, then publish only the allocated guest fd.
+
+A non-returning guest import such as `proc_exit` must not return an empty success
+and let the guest continue. First let the backend accept the typed outcome, then
+interrupt the VM through a stable adapter-owned marker and retain the structured
+value for the embedder to inspect or consume. Clear stale outcomes before each
+attempt, and keep backend rejection distinct from an accepted guest exit.

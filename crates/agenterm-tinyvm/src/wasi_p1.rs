@@ -7,7 +7,7 @@
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::cell::{Ref, RefCell, RefMut};
+use core::cell::{Cell, Ref, RefCell, RefMut};
 
 use crate::{
     DescriptorRights, GuestFd, HostBackend, HostClock, HostContext, HostError, OpenOptions, Val,
@@ -15,6 +15,7 @@ use crate::{
 };
 
 pub const WASI_SNAPSHOT_PREVIEW1: &str = "wasi_snapshot_preview1";
+pub const WASI_PROC_EXIT_TRAP: &str = "wasi preview1 proc_exit";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct WasiErrno(pub u16);
@@ -52,12 +53,14 @@ impl From<HostError> for WasiErrno {
 
 pub struct WasiPreview1<B: HostBackend> {
     context: Rc<RefCell<HostContext<B>>>,
+    exit_code: Rc<Cell<Option<u32>>>,
 }
 
 impl<B: HostBackend> Clone for WasiPreview1<B> {
     fn clone(&self) -> Self {
         Self {
             context: self.context.clone(),
+            exit_code: self.exit_code.clone(),
         }
     }
 }
@@ -66,6 +69,7 @@ impl<B: HostBackend + 'static> WasiPreview1<B> {
     pub fn new(context: HostContext<B>) -> Self {
         Self {
             context: Rc::new(RefCell::new(context)),
+            exit_code: Rc::new(Cell::new(None)),
         }
     }
 
@@ -75,6 +79,16 @@ impl<B: HostBackend + 'static> WasiPreview1<B> {
 
     pub fn try_context_mut(&self) -> Result<RefMut<'_, HostContext<B>>, HostError> {
         self.context.try_borrow_mut().map_err(|_| HostError::Io)
+    }
+
+    /// Returns the most recent successful `proc_exit` code without consuming it.
+    pub fn exit_code(&self) -> Option<u32> {
+        self.exit_code.get()
+    }
+
+    /// Takes the most recent successful `proc_exit` code.
+    pub fn take_exit_code(&self) -> Option<u32> {
+        self.exit_code.take()
     }
 
     /// Validates and binds every WASI P1 import currently implemented here.
@@ -95,6 +109,15 @@ impl<B: HostBackend + 'static> WasiPreview1<B> {
                 continue;
             }
             let context = self.context.clone();
+            if matches!(function, Function::ProcExit) {
+                let exit_code = self.exit_code.clone();
+                module.bind_import_typed(
+                    WASI_SNAPSHOT_PREVIEW1,
+                    function.name(),
+                    move |args, _memory| proc_exit(&context, &exit_code, args),
+                )?;
+                continue;
+            }
             module.bind_import_typed(
                 WASI_SNAPSHOT_PREVIEW1,
                 function.name(),
@@ -127,10 +150,11 @@ enum Function {
     FdFilestatGet,
     PathOpen,
     PathUnlinkFile,
+    ProcExit,
 }
 
 impl Function {
-    const COUNT: usize = 15;
+    const COUNT: usize = 16;
     const ALL: [Self; Self::COUNT] = [
         Self::ArgsGet,
         Self::ArgsSizesGet,
@@ -147,6 +171,7 @@ impl Function {
         Self::FdFilestatGet,
         Self::PathOpen,
         Self::PathUnlinkFile,
+        Self::ProcExit,
     ];
 
     fn from_name(name: &str) -> Option<Self> {
@@ -166,6 +191,7 @@ impl Function {
             "fd_filestat_get" => Self::FdFilestatGet,
             "path_open" => Self::PathOpen,
             "path_unlink_file" => Self::PathUnlinkFile,
+            "proc_exit" => Self::ProcExit,
             _ => return None,
         })
     }
@@ -187,6 +213,7 @@ impl Function {
             Self::FdFilestatGet => "fd_filestat_get",
             Self::PathOpen => "path_open",
             Self::PathUnlinkFile => "path_unlink_file",
+            Self::ProcExit => "proc_exit",
         }
     }
 
@@ -218,6 +245,7 @@ impl Function {
             ValueType::I32,
         ];
         const I32: &[ValueType] = &[ValueType::I32];
+        const EMPTY: &[ValueType] = &[];
         match self {
             Self::ArgsGet
             | Self::ArgsSizesGet
@@ -233,6 +261,7 @@ impl Function {
             Self::FdFilestatGet => (I32_I32, I32),
             Self::PathOpen => (PATH_OPEN, I32),
             Self::PathUnlinkFile => (I32_I32_I32, I32),
+            Self::ProcExit => (I32, EMPTY),
         }
     }
 
@@ -278,6 +307,7 @@ fn dispatch<B: HostBackend>(
         Function::FdFilestatGet => fd_filestat_get(context, args, memory),
         Function::PathOpen => path_open(context, args, memory),
         Function::PathUnlinkFile => path_unlink_file(context, args, memory),
+        Function::ProcExit => WasiErrno::NOSYS,
     }
 }
 
@@ -764,6 +794,25 @@ fn path_unlink_file<B: HostBackend>(
         Ok(()) => WasiErrno::SUCCESS,
         Err(error) => error.into(),
     }
+}
+
+fn proc_exit<B: HostBackend>(
+    context: &Rc<RefCell<HostContext<B>>>,
+    exit_code: &Cell<Option<u32>>,
+    args: &[Val],
+) -> Result<Vec<Val>, WasmError> {
+    let [Val::I32(code)] = args else {
+        return Err(WasmError::Trap("wasi preview1 proc_exit arguments"));
+    };
+    exit_code.set(None);
+    let Ok(mut context) = context.try_borrow_mut() else {
+        return Err(WasmError::Trap("wasi preview1 host is already borrowed"));
+    };
+    context
+        .exit(*code as u32)
+        .map_err(|_| WasmError::Trap("wasi preview1 proc_exit backend"))?;
+    exit_code.set(Some(*code as u32));
+    Err(WasmError::Trap(WASI_PROC_EXIT_TRAP))
 }
 
 fn descriptor_rights(raw: u64) -> Option<DescriptorRights> {

@@ -3277,3 +3277,27 @@ library tests and every non-ignored integration test, including the real iOS
 XCFramework/Swift link and three-game tinyvm/JSC/H5 differential. Linked sizes
 remain 1,602,104 bytes arm64 and 1,677,136 bytes x86_64; the stripped static core
 remains 101,256 bytes with selftest 42.
+
+## One-hundredth executable increment — non-returning WASI process exit
+
+The optional Preview 1 subset now includes the exact `(i32) → ()` `proc_exit`
+import. It clears any stale outcome, asks `HostContext`/`HostBackend` to accept
+the unsigned exit code, records that typed code in the clonable adapter owner,
+then interrupts execution through the stable exported `WASI_PROC_EXIT_TRAP`
+marker. It never returns an empty success that would let guest instructions
+after `proc_exit` execute. Embedders can inspect or consume the code through
+`exit_code()` and `take_exit_code()`; backend rejection remains a separate trap
+and does not publish an outcome.
+
+Evidence on 2026-08-22: a standards-shaped binary calls `proc_exit(7)` before a
+would-be return of 99. The backend receives exactly 7, invocation ends with the
+dedicated non-returning marker, and both typed adapter accessors behave as
+specified. A separate import-only binary binds all 16 exact signatures so the
+completed parent profile has direct executable coverage, not only child-leaf
+claims. The focused no-default-feature tests, warnings-denied Clippy and arm64
+iOS `no_std` feature check pass. After the PRD traceability gate caught and then
+verified that new parent mapping, the complete all-feature/all-target suite
+passes all 127 library tests and every non-ignored integration test, including
+the iOS XCFramework/Swift link and three-game tinyvm/JSC/H5 differential.
+Linked sizes remain 1,602,104 bytes arm64 and 1,677,136 bytes x86_64; the
+stripped static core remains 101,256 bytes with selftest 42.

@@ -636,7 +636,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 87] = [
+const LEAF_TESTS: [(&str, &str); 89] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -898,6 +898,10 @@ const LEAF_TESTS: [(&str, &str); 87] = [
         "preopens_keep_physical_paths_out_of_guest_space",
     ),
     (
+        "optional WASI Preview 1 adapter",
+        "wasi_p1_complete_subset_binds_all_exact_signatures",
+    ),
+    (
         "args + environ",
         "wasi_p1_process_clock_random_preopen_and_close_execute_through_standard_imports",
     ),
@@ -916,6 +920,10 @@ const LEAF_TESTS: [(&str, &str); 87] = [
     (
         "path open/unlink",
         "wasi_p1_path_open_and_unlink_stay_relative_to_a_virtual_preopen",
+    ),
+    (
+        "proc_exit",
+        "wasi_p1_proc_exit_is_non_returning_and_exposes_the_typed_code",
     ),
     ("<100KiB>", "size_budget_script_gates_100kib"),
     ("#78", "issue78_runtimes_stay_out_of_the_crate"),

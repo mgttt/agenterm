@@ -2,7 +2,8 @@
 
 use agenterm_tinyvm::{
     DescriptorRights, FileStat, FileType, HostBackend, HostClock, HostContext, HostError,
-    HostHandle, HostLimits, HostResult, OpenOptions, SeekWhence, Val, WasiPreview1, WasmModule,
+    HostHandle, HostLimits, HostResult, OpenOptions, SeekWhence, Val, WASI_PROC_EXIT_TRAP,
+    WasiPreview1, WasmModule,
 };
 
 #[derive(Default)]
@@ -11,6 +12,7 @@ struct FixtureBackend {
     written: Vec<u8>,
     opened: Vec<String>,
     unlinked: Vec<String>,
+    exited: Vec<u32>,
 }
 
 impl HostBackend for FixtureBackend {
@@ -101,8 +103,9 @@ impl HostBackend for FixtureBackend {
         Ok(())
     }
 
-    fn exit(&mut self, _code: u32) -> HostResult<()> {
-        Err(HostError::NotSupported)
+    fn exit(&mut self, code: u32) -> HostResult<()> {
+        self.exited.push(code);
+        Ok(())
     }
 }
 
@@ -166,6 +169,50 @@ fn wasi_p1_rejects_unknown_or_wrongly_typed_imports_before_instantiation() {
         "decode wrong-signature fixture",
     );
     assert!(wasi.bind(&mut wrong).is_err());
+}
+
+#[test]
+fn wasi_p1_complete_subset_binds_all_exact_signatures() {
+    let types = vec![
+        function_type(&[0x7f, 0x7f], &[0x7f]),
+        function_type(&[0x7f, 0x7e, 0x7f], &[0x7f]),
+        function_type(&[0x7f, 0x7f, 0x7f], &[0x7f]),
+        function_type(&[0x7f], &[0x7f]),
+        function_type(&[0x7f, 0x7f, 0x7f, 0x7f], &[0x7f]),
+        function_type(&[0x7f, 0x7e, 0x7f, 0x7f], &[0x7f]),
+        function_type(
+            &[0x7f, 0x7f, 0x7f, 0x7f, 0x7f, 0x7e, 0x7e, 0x7f, 0x7f],
+            &[0x7f],
+        ),
+        function_type(&[0x7f], &[]),
+    ];
+    let imports = [
+        ("args_get", 0),
+        ("args_sizes_get", 0),
+        ("environ_get", 0),
+        ("environ_sizes_get", 0),
+        ("clock_time_get", 1),
+        ("random_get", 0),
+        ("fd_prestat_get", 0),
+        ("fd_prestat_dir_name", 2),
+        ("fd_close", 3),
+        ("fd_read", 4),
+        ("fd_write", 4),
+        ("fd_seek", 5),
+        ("fd_filestat_get", 0),
+        ("path_open", 6),
+        ("path_unlink_file", 2),
+        ("proc_exit", 7),
+    ];
+    let wasi = WasiPreview1::new(HostContext::new(
+        FixtureBackend::default(),
+        HostLimits::default(),
+    ));
+    let mut module = must(
+        WasmModule::from_bytes(&module(types, &imports, 0, None, &[])),
+        "decode complete WASI subset",
+    );
+    must(wasi.bind(&mut module), "bind complete WASI subset");
 }
 
 #[test]
@@ -339,6 +386,29 @@ fn wasi_p1_path_escape_fails_before_the_backend() {
     assert!(context.backend().unlinked.is_empty());
 }
 
+#[test]
+fn wasi_p1_proc_exit_is_non_returning_and_exposes_the_typed_code() {
+    let wasi = WasiPreview1::new(HostContext::new(
+        FixtureBackend::default(),
+        HostLimits::default(),
+    ));
+    let mut module = must(
+        WasmModule::from_bytes(&proc_exit_module()),
+        "decode proc-exit fixture",
+    );
+    must(wasi.bind(&mut module), "bind proc_exit import");
+    let mut instance = must(module.instantiate(), "instantiate proc-exit fixture");
+    assert!(matches!(
+        instance.invoke_by_name("main", &[]),
+        Err(agenterm_tinyvm::WasmError::Trap(message)) if message == WASI_PROC_EXIT_TRAP
+    ));
+    assert_eq!(wasi.exit_code(), Some(7));
+    assert_eq!(wasi.take_exit_code(), Some(7));
+    assert_eq!(wasi.exit_code(), None);
+    let context = wasi.try_context().expect("borrow context after proc_exit");
+    assert_eq!(context.backend().exited, [7]);
+}
+
 fn fixture_module() -> Vec<u8> {
     let types = vec![
         function_type(&[0x7f, 0x7f], &[0x7f]),
@@ -475,6 +545,16 @@ fn path_fixture_module(path: &[u8]) -> Vec<u8> {
     call(&mut body, 1);
     body.push(0x0b);
     module(types, &imports, 2, Some(body), &[(64, path)])
+}
+
+fn proc_exit_module() -> Vec<u8> {
+    let types = vec![function_type(&[0x7f], &[]), function_type(&[], &[0x7f])];
+    let mut body = vec![0];
+    i32_const(&mut body, 7);
+    call(&mut body, 0);
+    i32_const(&mut body, 99);
+    body.push(0x0b);
+    module(types, &[("proc_exit", 0)], 1, Some(body), &[])
 }
 
 fn single_import_module(field: &str, type_index: u32) -> Vec<u8> {
