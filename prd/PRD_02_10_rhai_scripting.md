@@ -133,9 +133,10 @@ doc-comment-asserted:
   (`crates/agenterm-rh/src/shipped_surfaces.rs`) is a pinned superset, +47
   entries over the lua/qjs 29.
 
-**Open finding — rh declares 32 `fleet.*` surfaces the host cannot
+**Open finding — rh declares 33 `fleet.*` surfaces the host cannot
 dispatch (found and pinned 2026-08-08, `tests/script_fleet_facade_parity.rs`,
-`50ab1f7e`).** rh's `shipped_surfaces.rs` declares 76 `fleet.*` paths; 32 of
+`50ab1f7e`).** rh's `shipped_surfaces.rs` declares 76 `fleet.*` paths and
+`src/operations.rs` carries 43 `script_surface: "fleet…"` rows, so 33 of
 them have no matching entry in `src/operations.rs`'s `OPERATION_CATALOG` —
 the authoritative, dispatchable operation-id list that `operation_by_id`
 actually looks up. Affected families: `ui.settings.*`, `ui.modal.*`,
@@ -146,8 +147,8 @@ actually looks up. Affected families: `ui.settings.*`, `ui.modal.*`,
 `ui.window-close.keep-server-running`). This is declared-but-unimplemented,
 not a silently dropped bug — lua/qjs's 29 operation IDs are a clean subset
 of `OPERATION_CATALOG` with no equivalent gap. It is pinned by an explicit
-32-entry allowlist in the parity test so the asymmetry can't regress
-silently, but the disposition (drop the 32 declarations vs implement the
+33-entry allowlist in the parity test so the asymmetry can't regress
+silently, but the disposition (drop the 33 declarations vs implement the
 missing host entries) is undecided and belongs to the rh track owner, not
 this parity test.
 

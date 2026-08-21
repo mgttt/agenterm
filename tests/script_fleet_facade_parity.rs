@@ -438,7 +438,9 @@ fn rh_shipped_surface_operation_ids_not_in_host_catalog_match_documented_gap() {
 /// Documented, explicit allowlist of operation ids that rh's
 /// `shipped_surfaces.rs` declares as supported but that
 /// `src/operations.rs::OPERATION_CATALOG` does not implement/dispatch.
-/// Extracted from the investigation run on 2026-08-09; 32 entries.
+/// Extracted from the investigation run on 2026-08-09; 33 entries.
+/// (The comment said 32 while the array held 33, which is how that figure
+/// got copied into the PRD.)
 fn rh_surfaces_missing_from_host_catalog() -> BTreeSet<String> {
     [
         "terminal.copy-selection",

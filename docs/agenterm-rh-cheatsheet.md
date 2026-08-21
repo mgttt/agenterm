@@ -14,6 +14,32 @@ and the scripts under `scripts/rh/` that are proven to compile native.
 
 ---
 
+## 0a. Two engines, and which one you are talking to
+
+`agenterm rh` runs `.rh` two different ways, and the difference decides what a
+green result actually proves.
+
+| Verb | Engine | Needs a Rust toolchain? |
+|------|--------|-------------------------|
+| `eval`, `run` | interpreter | no |
+| `compile`, `transpile`, `pack`, `qualify`, `run-smoke`, `task` | AOT native pack | yes |
+
+`eval` and `run` execute the script directly. They are fast, they work without
+`cargo`/`rustc` present, and they are the right thing for "does this script do
+what I meant".
+
+They are **not** evidence that a script compiles. The transpiler is stricter
+than the interpreter — that is the entire subject of this document — so a
+script can `eval` perfectly and still fail to lower. The gates run the AOT
+path, so anything you are about to hand to a gate has to be checked with
+`mode_probe` and the task verbs below, not with `eval`.
+
+The reverse also matters: `eval` is the honest way to see runtime behaviour
+without paying a compile, so use it while iterating and use the AOT verbs
+before you claim a script is ready.
+
+---
+
 ## 0. The one command you must run after editing a `.rh`
 
 ```bash
@@ -27,7 +53,7 @@ different** (see §7). Then:
 
 ```bash
 agenterm rh check scripts/rh/your-script.rh                      # subset validation
-agenterm rh eval scripts/rh/your-script.rh                       # check + pack + call entry
+agenterm rh eval scripts/rh/your-script.rh                       # run on the interpreter
 agenterm rh task run <task-id> --manifest agenterm.tasks.json    # as the gates run it
 ```
 

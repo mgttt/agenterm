@@ -159,6 +159,16 @@ release 可执行文件）。
 
 **rh 切换：** 宿主经 [`src/script_backend.rs`](../src/script_backend.rs) 选择 backend；详见 [`plan/design-rh-aot.md`](design-rh-aot.md)。
 
+**rh 两条执行路径：** `agenterm rh eval` / `run` 走 `crates/agenterm-rh` 里的
+Language-1 解释器——直接执行,不需要 Rust 工具链,也不落 native pack。
+`compile` / `transpile` / `pack` / `qualify` / `run-smoke` / `task` 仍走 AOT:
+转译成 Rust、`cargo` 编 cdylib、`dlopen` 调 `rh_entry()`,任务闸依赖的就是这条。
+两条路径不是同一把尺子——转译器比解释器严格,所以 `eval` 通过不构成「能编成
+pack」的证据;要给闸看的东西必须走 AOT 那条验。工作台自身的能力(Fleet、PTY、
+GUI)对解释器不是内建语法,而是由宿主实现 `rh::Host` 后按名字应答
+(`Host::call("fleet.tabs.list", ...)`);加能力是加名字,不是改语言。
+详见 [`plan/design-rh-standalone-product.md`](design-rh-standalone-product.md)。
+
 Authority entry plan: [`plan/archive/plan-agenterm-server-mode.md`](archive/plan-agenterm-server-mode.md)。
 
 Cargo 版本号见根 `Cargo.toml`（与公开 tag 可能暂时脱节——发版以 Candidate/Release 链为准）。
