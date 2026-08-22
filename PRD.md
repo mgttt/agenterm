@@ -149,7 +149,7 @@ AgenTerm — local agent & process fleet work OS
 ├─ 内部原生底座
 │  ├─ 34 agenterm-dyn          publish=false 的极小 native door；当前授权范围持续收口
 │  │                          ISA folding / wasm export / libagenterm merge 仍未授权
-│  └─ 35 agenterm-tinyvm       iOS 边界下的自有 native WASM 核；非 H5/JS/WKWebView，不生成/加载动态原生代码
+│  └─ 35 tinyvm                已迁出到独立仓 partnernetsoftware/tinyvm；agenterm 只作下游 embedder
 │
 └─ 未来面（里程碑 / 灵感）
    ├─ 18 Focused product roadmap  版本归属、里程碑门、未来产品泳道
@@ -196,7 +196,7 @@ AgenTerm — local agent & process fleet work OS
 | 32 | [`agenterm-cu` window placement](prd/PRD_02_32_cu_window_placement.md) | 命名窗口摆放与几何合同（Spectacle 收录）；macOS host 已落地，Windows desktop-host ABI 1.7 已通过本机 self-test，正式交付仍在 qualification |
 | 33 | [Mobile reach (`agenterm-mobile`)](prd/PRD_02_33_mobile_reach.md) | 手机接入端：PWA 先行（`https://agenterm.work/app`）、商店 App 占位、扫码绑定桌面；无版本承诺 |
 | 34 | [`agenterm-dyn` internal native door](prd/PRD_02_34_agenterm_dyn.md) | `publish = false` 的极小 S-expr / intern / bounded `dlcall` crate；当前授权范围持续收口，host-ISA folding、wasm export 与 libagenterm merge 仍未授权 |
-| 35 | [`agenterm-tinyvm` standard WebAssembly VM](prd/PRD_02_35_agenterm_tinyvm.md) | iOS 边界下自有、跨平台、可预算的 WASM VM，非 H5/JS/WKWebView；scalar MVP 后持续纳入有完整资源与差分证据的标准 proposal；核 <100KiB |
+| 35 | `tinyvm` standard WebAssembly VM — **已迁出** | 2026-08-22 起源码与 PRD 在独立仓 [`partnernetsoftware/tinyvm`](https://github.com/partnernetsoftware/tinyvm)（本地 `../tinyvm`）。iOS 边界下自有、跨平台、可预算的 WASM VM，核 <100KiB。agenterm 不再持有其写刀 |
 
 ## Non-negotiable invariants
 

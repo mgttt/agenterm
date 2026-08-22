@@ -1,4 +1,0 @@
-module TinyArcade {
-    header "tinyarcade.h"
-    export *
-}

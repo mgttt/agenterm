@@ -201,29 +201,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agenterm-tinyvm"
-version = "0.1.0"
-dependencies = [
- "agenterm-tinyvm-qjs",
- "base64",
- "cap-std",
- "getrandom 0.4.3",
- "libm",
- "ring",
- "serde",
- "serde_json",
- "tempfile",
- "wat",
-]
-
-[[package]]
-name = "agenterm-tinyvm-qjs"
-version = "0.1.0"
-dependencies = [
- "agenterm-tinyvm",
-]
-
-[[package]]
 name = "agenterm-ui-core"
 version = "0.1.16"
 dependencies = [
