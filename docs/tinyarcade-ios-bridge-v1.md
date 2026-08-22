@@ -548,7 +548,10 @@ these remain simulator figures until the physical command is run.
 `smoke-nostalgia-consumer.sh` is the runtime-owned closure of that integration
 boundary. It rebuilds the package from this checkout, executes 13 App-target
 unit tests plus the two-game UI journey, and builds the generic arm64 iOS
-product. It then requires the consumer's archive to be byte-identical to the
+product. Before the expensive Xcode journey it also executes the consumer's
+TestFlight identity fixture gate, so an App build-number bump cannot silently
+leave the physical-evidence verifier targeting a stale build. It then requires
+the consumer's archive to be byte-identical to the
 one emitted under this repository's `target/`, checks that the final executable
 contains the ABI v1.10 completion-channel symbol while consuming the current
 v1.13 archive, and rejects any implicit

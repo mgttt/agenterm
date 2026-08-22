@@ -4849,3 +4849,20 @@ This proves the evidence workflow and current upload identity, not Apple-side
 availability or physical behavior. Processing/install, lifecycle, memory,
 frame-time, input and audio evidence therefore remain open and the persistent
 goal stays active.
+
+## One-hundred-fifty-seventh executable increment — consumer-owned TestFlight identity regression
+
+The runtime-owned real-App gate now runs the consumer's TestFlight-install
+identity black box before its expensive Xcode journey. This closes the
+automation gap exposed while advancing build 37 to 38: the project version had
+changed but the fixture still named the old build, and only a separately invoked
+script noticed. From now on every current-main tinyvm consumer qualification
+requires the fixture's project-derived version/build to agree and retains its
+wrong-build, developer-install and missing-App failures.
+
+The integrated gate passes against Nostalgia Arcade build 38, then still runs
+13 cartridge unit tests, the two-game UI journey, the generic arm64 Release
+build and exact producer/consumer archive identity check. It does not turn the
+fixture into physical evidence: Apple availability and the live
+`builtByDeveloper == false` device record remain open until a connected iPhone
+runs the production path. The persistent goal therefore stays active.

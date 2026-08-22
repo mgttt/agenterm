@@ -4,6 +4,7 @@ set -eu
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 CONSUMER=${NOSTALGIA_ARCADE_REPO:-"$(dirname -- "$ROOT")/nostalgia-arcade"}
 GATE="$CONSUMER/scripts/test-tinyarcade-consumer.sh"
+TESTFLIGHT_GATE="$CONSUMER/scripts/test-testflight-install-verifier.sh"
 DEPTH="$CONSUMER/App/Resources/depth-well-0.1.0.wasm"
 SIGNAL="$CONSUMER/App/Resources/signal-lock-0.1.0.wasm"
 PROJECT="$CONSUMER/NostalgiaArcade.xcodeproj/project.pbxproj"
@@ -15,6 +16,7 @@ DEPTH_RUNTIME="$CONSUMER/App/Sources/BundledDepthWellCartridgeRuntime.swift"
 SIGNAL_RUNTIME="$CONSUMER/App/Sources/BundledSignalLockCartridgeRuntime.swift"
 
 test -x "$GATE"
+test -x "$TESTFLIGHT_GATE"
 test -f "$DEPTH"
 test -f "$SIGNAL"
 test -f "$PROJECT"
@@ -62,6 +64,11 @@ if grep -Fq 'gameClockMilliseconds &+=' "$DEPTH_SCREEN" "$SIGNAL_SCREEN"; then
   exit 1
 fi
 
+# Keep the physical-evidence preflight aligned with the consumer's current
+# project version before paying for the full Xcode journey. Its fixture gate
+# rejects stale builds, Xcode developer installs and a missing App.
+"$TESTFLIGHT_GATE"
+
 # This gate is allowed to refresh ignored build products, but a successful run
 # must not silently rewrite any committed consumer input. A runtime/cartridge
 # change therefore requires an explicit consumer commit before this closes.
@@ -83,5 +90,5 @@ test -f "$app"
 cmp "$producer" "$consumed"
 nm -gj "$app" | grep -Fqx '_tinyarcade_v1_completion_create'
 
-echo 'OK: exact current-main tinyvm archive and ABI v1.13 run in the real arm64 App target with behavioral Apple input proofs'
+echo 'OK: exact current-main tinyvm archive and ABI v1.13 run in the real arm64 App target; TestFlight identity and behavioral Apple input gates pass'
 shasum -a 256 "$producer" "$consumed"
