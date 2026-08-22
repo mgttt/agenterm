@@ -14,37 +14,40 @@ fn same_i32(a: Result<Vec<Val>, WasmError>, b: Result<Vec<Val>, WasmError>, want
     must_i32(b, want, &format!("{what} via eval_qjs"));
 }
 
+fn roundtrip(src: &str, globals: &[HostGlobal<'_>], locals: &[Val], want: i32) {
+    let wasm = qjs2wasm(src).unwrap_or_else(|e| panic!("qjs2wasm {src}: {}", e.message()));
+    assert!(wasm.starts_with(b"\0asm"), "{src} must emit wasm");
+    same_i32(
+        eval_wasm(&wasm, globals, locals),
+        eval_qjs(src, globals, locals),
+        want,
+        src,
+    );
+}
+
 #[test]
 fn qjs2wasm_bytes_feed_eval_wasm_and_match_eval_qjs() {
-    let src = "40+2";
-    let wasm = qjs2wasm(src).unwrap_or_else(|e| panic!("qjs2wasm 40+2: {}", e.message()));
-    assert!(wasm.starts_with(b"\0asm"));
-    same_i32(
-        eval_wasm(&wasm, &[], &[]),
-        eval_qjs(src, &[], &[]),
-        42,
-        "40+2",
-    );
+    roundtrip("40+2", &[], &[], 42);
 
-    let src = "g+2";
-    let wasm = qjs2wasm(src).unwrap_or_else(|e| panic!("qjs2wasm g+2: {}", e.message()));
     let globals = [HostGlobal::new("js", "g", Val::I32(40))];
-    same_i32(
-        eval_wasm(&wasm, &globals, &[]),
-        eval_qjs(src, &globals, &[]),
-        42,
-        "g+2 host name",
-    );
+    roundtrip("g+2", &globals, &[], 42);
+    roundtrip("g()+$0", &globals, &[Val::I32(2)], 42);
 
-    let src = "$0+2";
-    let wasm = qjs2wasm(src).unwrap_or_else(|e| panic!("qjs2wasm $0+2: {}", e.message()));
-    let locals = [Val::I32(40)];
-    same_i32(
-        eval_wasm(&wasm, &[], &locals),
-        eval_qjs(src, &[], &locals),
-        42,
-        "$0+2 local",
-    );
+    roundtrip("$0+2", &[], &[Val::I32(40)], 42);
+}
+
+#[test]
+fn thicker_subset_names_ops_host_call() {
+    let g = [HostGlobal::new("js", "g", Val::I32(40))];
+    let loc = [Val::I32(2)];
+    roundtrip("(g+$0)*2", &g, &loc, 84);
+    roundtrip("g()*$0-2", &g, &loc, 78);
+    roundtrip("1+2*3", &[], &[], 7);
+    roundtrip("(1+2)*3", &[], &[], 9);
+    roundtrip("8/3", &[], &[], 2);
+    roundtrip("8%3", &[], &[], 2);
+    roundtrip("-2+5", &[], &[], 3);
+    roundtrip("-$0+g()", &g, &loc, 38);
 }
 
 #[test]
@@ -54,4 +57,13 @@ fn qjs2wasm_rejects_full_js_as_a_converter() {
         Err(WasmError::Decode(_))
     ));
     assert!(matches!(qjs2wasm("eval(1)"), Err(WasmError::Decode(_))));
+    assert!(matches!(qjs2wasm("const x = 1"), Err(WasmError::Decode(_))));
+    match qjs2wasm("g($0)") {
+        Err(e) => assert!(
+            e.message().contains("two bindings"),
+            "g($0) must name the two-binding rule, got {}",
+            e.message()
+        ),
+        Ok(_) => panic!("g($0) must not grow a third world"),
+    }
 }

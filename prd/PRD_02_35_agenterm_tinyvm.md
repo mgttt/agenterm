@@ -26,7 +26,13 @@ Legend: `[x]` 已有可执行证据 · `[~]` 部分完成 · `[ ]` 规划 · `[�
 agenterm-tinyvm (35)                                      [~]
 │
 ├── product boundary                                     [~]
-│   ├── eval(bytes)                                       [x]
+│   ├── eval_wasm(data, globals, locals)                  [x]
+│   │   └── eval / eval_with aliases                      [x]
+│   ├── language skin (agenterm-tinyvm-qjs)               [x]
+│   │   ├── qjs2wasm names / ops / host-call subset       [x]
+│   │   ├── eval_qjs = eval_wasm(qjs2wasm, globals, locals) [x]
+│   │   ├── commissar demo (example commissar)            [x]
+│   │   └── full JS engine / AOT                          [–]
 │   ├── host                                              [x]
 │   ├── <100KiB>                                          [x]
 │   └── iOS runtime boundary                              [x]
@@ -232,7 +238,8 @@ agenterm-tinyvm (35)                                      [~]
     ├── #78                                                [x]
     ├── WASI as implicit/default game host                 [x]
     ├── APE                                                [x]
-    └── WAT                                                [x]
+    ├── WAT                                                [x]
+    └── full JS engine in agenterm-tinyvm-qjs              [–]
 ```
 
 The first tree is executable product truth: every `[x]` leaf is backed by an owning
@@ -244,8 +251,15 @@ as “almost approved” or “safe to ship externally.”
 
 ### 1. Standard Wasm is the executable format
 
-- Input is a standard WebAssembly binary module. WAT is a development source format,
-  not a runtime input.
+- The product face is `eval_wasm(data, globals, locals)`: `data` is a standard
+  WebAssembly binary module (`\0asm`). `globals` bind the import table at the host
+  door; `locals` are this call's arguments. `eval` / `eval_with` remain empty-gate
+  aliases. WAT is a development source format, not a runtime input.
+- `agenterm-tinyvm-qjs` is a language skin, not a JS engine: `qjs2wasm` lowers a
+  name / arithmetic / zero-arg host-call subset to MVP wasm; `eval_qjs` is
+  `eval_wasm(&qjs2wasm(src)?, globals, locals)`. The world is only those two
+  bindings. Full JS / AOT is excluded. The commissar demo is
+  `cargo run -p agenterm-tinyvm-qjs --example commissar`.
 - TinyArcade metadata lives in a standard custom section. Host capability use remains
   ordinary versioned function imports.
 - `tinyvm module validate FILE.wasm` validates an ordinary module without requiring a

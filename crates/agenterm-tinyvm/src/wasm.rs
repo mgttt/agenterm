@@ -1315,6 +1315,14 @@ fn apply_eval_globals(module: &mut Module, globals: &[HostGlobal<'_>]) -> Result
 /// arguments to the entry function. Runs the start function if present, then
 /// the first declared function export (or the first defined function if there
 /// is no export). Unbound imports trap if called. Uses [`Limits::default`].
+///
+/// ```
+/// use agenterm_tinyvm::{Val, eval_wasm};
+/// let data = b"\0asm\x01\x00\x00\x00\x01\x05\x01\x60\x00\x01\x7f\x03\x02\x01\x00\
+/// \x07\x08\x01\x04main\x00\x00\x0a\x06\x01\x04\x00\x41\x11\x0b";
+/// let got = eval_wasm(data, &[], &[]);
+/// assert!(matches!(got, Ok(vals) if matches!(vals.as_slice(), [Val::I32(17)])));
+/// ```
 pub fn eval_wasm(
     data: &[u8],
     globals: &[HostGlobal<'_>],
