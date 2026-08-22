@@ -3167,7 +3167,7 @@ public final class TinyArcadeAppleInputV1: NSObject {
     private let observesSystemDevices: Bool
     private var controllers: [ObjectIdentifier: ControllerBinding] = [:]
     private var keyboard: GCKeyboard?
-    private var keyboardButtons: TinyArcadeButtonsV1 = []
+    private var pressedKeyboardAliases: UInt16 = 0
     private var nextControllerSource: UInt64 = 1
     public private(set) var isActive = true
 
@@ -3234,7 +3234,7 @@ public final class TinyArcadeAppleInputV1: NSObject {
     public func releaseAll() {
         for binding in controllers.values { sourceHandler(binding.source, []) }
         if keyboard != nil { sourceHandler(Self.keyboardSource, []) }
-        keyboardButtons = []
+        pressedKeyboardAliases = 0
     }
 
     public func deactivate() {
@@ -3286,6 +3286,50 @@ public final class TinyArcadeAppleInputV1: NSObject {
         }
     }
 
+    private static func aliasBit(for keyCode: GCKeyCode) -> UInt16? {
+        switch keyCode {
+        case .leftArrow: 1 << 0
+        case .keyA: 1 << 1
+        case .rightArrow: 1 << 2
+        case .keyD: 1 << 3
+        case .upArrow: 1 << 4
+        case .keyW: 1 << 5
+        case .downArrow: 1 << 6
+        case .keyS: 1 << 7
+        case .spacebar: 1 << 8
+        case .keyZ: 1 << 9
+        case .keyX: 1 << 10
+        case .keyC: 1 << 11
+        case .returnOrEnter: 1 << 12
+        case .escape: 1 << 13
+        default: nil
+        }
+    }
+
+    private static func buttons(for aliases: UInt16) -> TinyArcadeButtonsV1 {
+        var buttons: TinyArcadeButtonsV1 = []
+        if aliases & 0x0003 != 0 { buttons.insert(.left) }
+        if aliases & 0x000c != 0 { buttons.insert(.right) }
+        if aliases & 0x0030 != 0 { buttons.insert(.up) }
+        if aliases & 0x00c0 != 0 { buttons.insert(.down) }
+        if aliases & 0x0300 != 0 { buttons.insert(.primary) }
+        if aliases & 0x0400 != 0 { buttons.insert(.secondary) }
+        if aliases & 0x0800 != 0 { buttons.insert(.tertiary) }
+        if aliases & 0x1000 != 0 { buttons.insert(.start) }
+        if aliases & 0x2000 != 0 { buttons.insert(.menu) }
+        return buttons
+    }
+
+    func updateKeyboard(keyCode: GCKeyCode, pressed: Bool) {
+        guard isActive, let bit = Self.aliasBit(for: keyCode) else { return }
+        if pressed {
+            pressedKeyboardAliases |= bit
+        } else {
+            pressedKeyboardAliases &= ~bit
+        }
+        sourceHandler(Self.keyboardSource, Self.buttons(for: pressedKeyboardAliases))
+    }
+
     func attach(_ controller: GCController) {
         let identity = ObjectIdentifier(controller)
         guard controllers[identity] == nil,
@@ -3331,15 +3375,9 @@ public final class TinyArcadeAppleInputV1: NSObject {
         self.keyboard = keyboard
         keyboard.handlerQueue = .main
         keyboard.keyboardInput?.keyChangedHandler = { [weak self] _, _, keyCode, pressed in
-            guard let self, let button = Self.button(for: keyCode) else { return }
+            guard let self else { return }
             let update = {
-                guard self.isActive else { return }
-                if pressed {
-                    self.keyboardButtons.insert(button)
-                } else {
-                    self.keyboardButtons.remove(button)
-                }
-                self.sourceHandler(Self.keyboardSource, self.keyboardButtons)
+                self.updateKeyboard(keyCode: keyCode, pressed: pressed)
             }
             if Thread.isMainThread {
                 MainActor.assumeIsolated(update)
@@ -3347,14 +3385,14 @@ public final class TinyArcadeAppleInputV1: NSObject {
                 DispatchQueue.main.async { MainActor.assumeIsolated(update) }
             }
         }
-        sourceHandler(Self.keyboardSource, keyboardButtons)
+        sourceHandler(Self.keyboardSource, [])
     }
 
     private func detach(_ keyboard: GCKeyboard) {
         guard self.keyboard === keyboard else { return }
         keyboard.keyboardInput?.keyChangedHandler = nil
         self.keyboard = nil
-        keyboardButtons = []
+        pressedKeyboardAliases = 0
         sourceHandler(Self.keyboardSource, [])
     }
 

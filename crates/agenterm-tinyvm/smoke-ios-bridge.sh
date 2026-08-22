@@ -37,6 +37,12 @@ grep -Fq 'keyboard.handlerQueue = .main' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 grep -Fq 'sourceHandler(binding.source, [])' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'pressedKeyboardAliases: UInt16' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+if grep -Fq 'Set<GCKeyCode>' "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
+  echo "bounded keyboard aliases must not require a generic hash set" >&2
+  exit 1
+fi
 
 CARGO="$CARGO" CARGO_TARGET_DIR="$TARGET_DIR" \
   "$CRATE/build-xcframework.sh" "$XCFRAMEWORK"

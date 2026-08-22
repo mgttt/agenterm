@@ -90,6 +90,10 @@ primary/secondary/tertiary/start; Menu maps to menu. Arrow keys or WASD map to
 directions, Space/Z/X/C to the three actions, Return to start and Escape to
 menu. Controller and keyboard handler queues are explicitly main-queue owned.
 Unknown keys and controllers without an extended-gamepad profile are ignored.
+The keyboard owner tracks the 14 supported physical aliases in one fixed
+16-bit mask before deriving portable buttons. Holding both Space and Z, or an
+arrow and its WASD alias, then releasing only one therefore preserves the
+other key's action without a hash table or an unbounded key collection.
 
 Disconnect, pause, scene resignation and owner deactivation publish an empty
 set for every attached source. Reactivation also starts empty: a key held while

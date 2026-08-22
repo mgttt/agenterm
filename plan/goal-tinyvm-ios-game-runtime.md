@@ -87,6 +87,7 @@ tinyvm iOS game runtime
 │   ├── Swift ownership/threading     [x]
 │   ├── input + monotonic clock owner [x]
 │   │   └── Apple keyboard/gamepad adapter [x]
+│   │       ├── overlapping key aliases [x]
 │   │       └── real App rising-edge behavior [x]
 │   ├── frame pacing + scene state    [x]
 │   ├── stable two-pass copy lengths  [x]
@@ -4117,3 +4118,23 @@ consumer gate now passes eight Depth Well tests, five Signal Lock tests, one
 two-game UI journey and an arm64 device Release build. The executable PRD trace
 now binds 131 completed claims. Physical controller/keyboard feel and latency
 remain open, so the persistent goal stays active.
+
+## One-hundred-thirty-first executable increment — overlap-safe key aliases
+
+The Apple keyboard adapter now distinguishes the 14 supported physical keys
+before reducing them to nine portable buttons. This closes the case where two
+aliases are held together—for example Space plus Z for primary, or Left Arrow
+plus A for left—and releasing one previously cleared the other still-held key.
+The finite key domain is represented by a fixed `UInt16` mask, not a generic
+set or an unbounded platform event collection.
+
+Evidence on 2026-08-22: the linked Swift black box holds both primary aliases,
+releases Space and observes primary remain; it then holds both left aliases,
+releases Left Arrow and observes left remain alongside primary before releasing
+the final keys to an empty state. The source gate rejects reintroducing a
+`Set<GCKeyCode>`. Default device/universal-simulator artifacts pass at
+1,749,608 bytes arm64 and 1,848,168 bytes x86_64, within the existing Apple
+input budgets; opt-in SIMD passes at 1,766,824 / 1,852,040 bytes. The
+executable PRD trace now binds 132 completed claims.
+Physical keyboard behavior remains an open device evidence leaf, so the
+persistent goal stays active.

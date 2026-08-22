@@ -398,6 +398,20 @@ struct TinyArcadeSmoke {
         precondition(TinyArcadeAppleInputV1.button(for: .keyC) == .tertiary)
         precondition(TinyArcadeAppleInputV1.button(for: .returnOrEnter) == .start)
         precondition(TinyArcadeAppleInputV1.button(for: .escape) == .menu)
+        appleInput.updateKeyboard(keyCode: .spacebar, pressed: true)
+        appleInput.updateKeyboard(keyCode: .keyZ, pressed: true)
+        appleInput.updateKeyboard(keyCode: .spacebar, pressed: false)
+        precondition(
+            aggregatedControllerInput.buttons == .primary,
+            "releasing one keyboard alias must preserve another held alias"
+        )
+        appleInput.updateKeyboard(keyCode: .leftArrow, pressed: true)
+        appleInput.updateKeyboard(keyCode: .keyA, pressed: true)
+        appleInput.updateKeyboard(keyCode: .leftArrow, pressed: false)
+        precondition(aggregatedControllerInput.buttons == [.left, .primary])
+        appleInput.updateKeyboard(keyCode: .keyZ, pressed: false)
+        appleInput.updateKeyboard(keyCode: .keyA, pressed: false)
+        precondition(aggregatedControllerInput.buttons.isEmpty)
 
         precondition(tinyarcade_v1_abi_version() == TINYARCADE_ABI_VERSION)
         var config = tinyarcade_config_v1()
