@@ -1,14 +1,17 @@
 use std::sync::LazyLock;
 
-static AGENTERM: LazyLock<String> =
-    LazyLock::new(|| include_str!("../.github/workflows/ci-agenterm.yml").replace("\r\n", "\n"));
-static CON: LazyLock<String> = LazyLock::new(|| {
-    include_str!("../.github/workflows/ci-agenterm-con.yml").replace("\r\n", "\n")
+static AGENTERM: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-agenterm.yml.disabled").replace("\r\n", "\n")
 });
-static LIB: LazyLock<String> =
-    LazyLock::new(|| include_str!("../.github/workflows/ci-libagenterm.yml").replace("\r\n", "\n"));
-static CHASSIS: LazyLock<String> =
-    LazyLock::new(|| include_str!("../.github/workflows/ci-chassis.yml").replace("\r\n", "\n"));
+static CON: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-agenterm-con.yml.disabled").replace("\r\n", "\n")
+});
+static LIB: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-libagenterm.yml.disabled").replace("\r\n", "\n")
+});
+static CHASSIS: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-chassis.yml.disabled").replace("\r\n", "\n")
+});
 
 #[test]
 fn split_feedback_ci_has_no_cross_product_cache_or_artifact_authority() {

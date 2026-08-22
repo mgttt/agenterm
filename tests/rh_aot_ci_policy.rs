@@ -1,9 +1,10 @@
 use std::sync::LazyLock;
 
-static WORKFLOW: LazyLock<String> =
-    LazyLock::new(|| include_str!("../.github/workflows/ci-agenterm.yml").replace("\r\n", "\n"));
+static WORKFLOW: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-agenterm.yml.disabled").replace("\r\n", "\n")
+});
 static CON_WORKFLOW: LazyLock<String> = LazyLock::new(|| {
-    include_str!("../.github/workflows/ci-agenterm-con.yml").replace("\r\n", "\n")
+    include_str!("../.github/workflows/ci-agenterm-con.yml.disabled").replace("\r\n", "\n")
 });
 static CANDIDATE: LazyLock<String> =
     LazyLock::new(|| include_str!("../.github/workflows/candidate.yml").replace("\r\n", "\n"));

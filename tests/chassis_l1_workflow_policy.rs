@@ -6,8 +6,9 @@ use std::{
 
 use serde_json::Value;
 
-static WORKFLOW: LazyLock<String> =
-    LazyLock::new(|| include_str!("../.github/workflows/ci-chassis.yml").replace("\r\n", "\n"));
+static WORKFLOW: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-chassis.yml.disabled").replace("\r\n", "\n")
+});
 
 fn run_python(root: &Path, arguments: &[&str]) -> Output {
     for interpreter in ["python3", "python"] {

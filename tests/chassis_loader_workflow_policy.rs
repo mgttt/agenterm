@@ -1,6 +1,6 @@
 //! Policy lock for the typed six-cell Chassis-L1 delivery chain.
 
-const CI: &str = include_str!("../.github/workflows/ci-chassis.yml");
+const CI: &str = include_str!("../.github/workflows/ci-chassis.yml.disabled");
 const CANDIDATE: &str = include_str!("../.github/workflows/candidate.yml");
 const PROMOTION: &str = include_str!("../.github/workflows/release.yml");
 const STAGE: &str = include_str!("../scripts/chassis-stage-l1-loader.py");

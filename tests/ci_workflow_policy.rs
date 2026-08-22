@@ -1,12 +1,14 @@
 use std::sync::LazyLock;
 
-static AGENTERM: LazyLock<String> =
-    LazyLock::new(|| include_str!("../.github/workflows/ci-agenterm.yml").replace("\r\n", "\n"));
-static CON: LazyLock<String> = LazyLock::new(|| {
-    include_str!("../.github/workflows/ci-agenterm-con.yml").replace("\r\n", "\n")
+static AGENTERM: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-agenterm.yml.disabled").replace("\r\n", "\n")
 });
-static CHASSIS: LazyLock<String> =
-    LazyLock::new(|| include_str!("../.github/workflows/ci-chassis.yml").replace("\r\n", "\n"));
+static CON: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-agenterm-con.yml.disabled").replace("\r\n", "\n")
+});
+static CHASSIS: LazyLock<String> = LazyLock::new(|| {
+    include_str!("../.github/workflows/ci-chassis.yml.disabled").replace("\r\n", "\n")
+});
 
 const CHECKOUT_SHA: &str = "08eba0b27e820071cde6df949e0beb9ba4906955";
 
