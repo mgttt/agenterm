@@ -2835,3 +2835,12 @@ Keep both rejected reference kinds, one accepted typed-reference counterpart
 and the existing accepted numeric form in the independent load-gate oracle.
 Otherwise decoder, validator and executor can agree with each other while
 still accepting bytes that standard engines reject.
+
+## `ref.func` declarations come from exports and element segments
+
+Reference-types validation does not require every `ref.func` target to appear
+in an element segment. A function export also declares its target for
+`ref.func`. Build the module-wide declaration bitmap from both sources before
+validating any body or constant expression; the declaration is independent of
+section order. Keep one exported target, one element-declared target and one
+otherwise undeclared rejection in the independent validator corpus.

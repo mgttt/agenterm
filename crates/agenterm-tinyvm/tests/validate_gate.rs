@@ -14,7 +14,7 @@ use agenterm_tinyvm::{WasmError, WasmModule, eval};
 use std::process::Command;
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
-const REJECTED: [(&str, &str); 35] = [
+const REJECTED: [(&str, &str); 36] = [
     (
         "empty_stack_add",
         "0061736d010000000105016000017f03020100070801046d61696e00000a050103006a0b",
@@ -54,6 +54,10 @@ const REJECTED: [(&str, &str); 35] = [
     (
         "untyped_select_externref",
         "0061736d010000000105016000016f03020100070801046d61696e00000a0b010900d06fd06f41001b0b",
+    ),
+    (
+        "ref_func_without_declaration",
+        "0061736d01000000010802600000600001700303020001070801046d61696e00010a090202000b0400d2000b",
     ),
     (
         "body_without_end",
@@ -155,7 +159,7 @@ const REJECTED: [(&str, &str); 35] = [
 ];
 
 /// Legal counterparts that must keep loading and running.
-const ACCEPTED: [(&str, &str); 12] = [
+const ACCEPTED: [(&str, &str); 14] = [
     (
         "add_two_consts",
         "0061736d010000000105016000017f03020100070801046d61696e00000a09010700410141026a0b",
@@ -175,6 +179,14 @@ const ACCEPTED: [(&str, &str); 12] = [
     (
         "typed_select_funcref",
         "0061736d010000000105016000017003020100070801046d61696e00000a0d010b00d070d07041011c01700b",
+    ),
+    (
+        "export_declares_ref_func",
+        "0061736d01000000010802600000600001700303020001070c02046d61696e0001016600000a090202000b0400d2000b",
+    ),
+    (
+        "element_declares_ref_func",
+        "0061736d010000000105016000017003020100040401700001070801046d61696e0000090501030001000a06010400d2000b",
     ),
     (
         "if_with_else_and_result",
@@ -317,6 +329,31 @@ fn standard_untyped_select_rejects_reference_values() {
         matches!(values.as_slice(), [agenterm_tinyvm::Val::FuncRef(None)]),
         "typed reference select must return one null funcref"
     );
+}
+
+#[test]
+fn standard_ref_func_declarations_include_function_exports() {
+    let (_, undeclared_hex) = REJECTED
+        .into_iter()
+        .find(|(name, _)| *name == "ref_func_without_declaration")
+        .expect("undeclared ref.func fixture");
+    assert!(matches!(
+        WasmModule::from_bytes(&bytes(undeclared_hex)),
+        Err(WasmError::Decode(_))
+    ));
+
+    for name in ["export_declares_ref_func", "element_declares_ref_func"] {
+        let (_, hex) = ACCEPTED
+            .into_iter()
+            .find(|(case, _)| *case == name)
+            .expect("declared ref.func fixture");
+        let values =
+            eval(&bytes(hex)).unwrap_or_else(|error| panic!("{name}: {}", error.message()));
+        assert!(
+            matches!(values.as_slice(), [agenterm_tinyvm::Val::FuncRef(Some(0))]),
+            "{name}: ref.func must preserve function index zero"
+        );
+    }
 }
 
 #[test]

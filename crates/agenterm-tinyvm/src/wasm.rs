@@ -4435,6 +4435,16 @@ impl Module {
             .try_reserve(function_count)
             .map_err(|_| WasmError::Decode("module allocation"))?;
         declared_refs.resize(function_count, false);
+        // A function export declares that function for `ref.func`, just as an
+        // element segment does. The standard declaration set is collected at
+        // module scope; requiring an element entry for an already-exported
+        // function rejects otherwise valid reference-types modules.
+        for (_, function) in &module.export_list {
+            let declared = declared_refs
+                .get_mut(*function)
+                .ok_or(WasmError::Decode("export index out of bounds"))?;
+            *declared = true;
+        }
         for segment in &elems {
             for function in segment.refs.iter().filter_map(|value| match value {
                 Val::FuncRef(Some(function)) => Some(*function),

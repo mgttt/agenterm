@@ -4368,3 +4368,28 @@ passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
 journey and an arm64 device Release build. Physical-iPhone lifecycle and
 TestFlight install/play evidence remain open, so the persistent goal stays
 active.
+
+## One-hundred-forty-first executable increment — exported ref.func declarations
+
+The reference-types load gate now builds the standard module-wide `ref.func`
+declaration set from function exports as well as element segments. An exported
+function can therefore be referenced without a redundant element entry, while
+a function that is neither exported nor element-declared still fails before a
+module becomes invokable. This corrects a valid 47-byte module that WABT
+accepted and tinyvm previously rejected.
+
+Evidence on 2026-08-22: independent fixtures execute both an export-declared
+and a declarative-element `ref.func`, and reject the otherwise identical
+undeclared target. WABT agrees with all 36 rejected and 14 accepted load-gate
+modules. The 143-claim executable PRD map, complete all-feature suite,
+warnings-denied Clippy, rustfmt, four-cartridge tinyvm/JSC/H5 differential and
+the unchanged 101,256-byte stripped static core pass. Default iOS consumers
+link at 1,797,720 bytes arm64 and 1,895,192 bytes x86_64, inside the existing
+ceilings. The real Nostalgia Arcade consumer rebuilds the exact archive
+(SHA-256
+`6d538fa642204c97e0f8f56756aae676c847df1dcaa98a6cd47a076cd34122ad`),
+passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
+journey and an arm64 device Release build. App Store Connect status remains
+unverified because no controllable signed-in browser is currently available;
+physical-iPhone lifecycle and TestFlight install/play evidence remain open, so
+the persistent goal stays active.
