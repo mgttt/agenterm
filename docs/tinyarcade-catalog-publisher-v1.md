@@ -54,7 +54,7 @@ operator cannot relabel executable bytes.
       "summary": "Drop polycubes into a deep well.",
       "localizations": {
         "zh-Hans": {
-          "title": "深井方块",
+          "title": "深井冰",
           "summary": "把立体方块落入深井。"
         }
       }

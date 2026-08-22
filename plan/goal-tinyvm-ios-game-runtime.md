@@ -4583,3 +4583,40 @@ archive (SHA-256
 `582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`).
 Physical-iPhone lifecycle and TestFlight install/play evidence remain open, so
 the persistent goal stays active.
+
+## One-hundred-forty-eighth executable increment — representative replay conformance report
+
+The replay checker now accepts `replay check GAME.wasm TRACE.tareplay --json`
+and emits the versioned `tinyarcade-replay-conformance-report` schema 1. This is
+a third, deliberately separate creator claim: the static host report proves one
+exact app build can bind a cartridge, the fixed dynamic report proves the core
+lifecycle and suspend/resume probe, and the replay report proves an
+author-selected gameplay route regenerates every recorded render/audio length
+and SHA-256. None is mislabeled as a substitute for the others.
+
+Every replay result has the same eleven top-level fields. It content-addresses
+both `.wasm` and `.tareplay`, retains decoded identity and trace bounds, repeats
+the exact eight converter limits, totals successfully verified frame/media
+bytes and names the first/final game clocks. Failures distinguish cartridge
+input, replay input, TAR1 decoding, exact cartridge binding, runtime
+initialization and generated-frame mismatch. `replay_valid` and nullable
+`cartridge_bound` report only facts actually evaluated; partial frame evidence
+is never published as a successful prefix. Paths and timestamps stay out, so
+identical artifacts produce byte-identical JSON.
+
+Evidence on 2026-08-22: real Depth Well, Paddle Guard and Signal Lock replay
+routes emit parseable successful reports for grid3d, indexed2d and actual tone
+output. Depth Well independently proves repeated byte identity plus missing
+cartridge, missing trace, malformed trace, changed cartridge and tampered frame
+digest reports with their exact stable stages. The 156-claim executable PRD
+map, complete all-feature suite, warnings-denied Clippy, rustfmt and the full
+standard-feature matrix pass. Default and SIMD static cores remain 101,256 and
+117,800 bytes; default iOS consumers link at 1,795,576 bytes arm64 and
+1,889,040 bytes x86_64, while opt-in SIMD links at 1,797,832 / 1,901,624 bytes.
+The real Nostalgia Arcade consumer passes eight Depth Well tests, five Signal
+Lock tests, the two-cartridge UI journey and an arm64 device Release build while
+consuming the exact current archive (SHA-256
+`582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`).
+No physical iPhone is connected; physical lifecycle/performance/audio and
+TestFlight install/play evidence remain open, so the persistent goal stays
+active.

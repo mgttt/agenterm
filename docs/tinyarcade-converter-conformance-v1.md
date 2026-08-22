@@ -31,6 +31,9 @@ cargo run -p agenterm-tinyvm --bin tinyvm -- \
 
 cargo run -p agenterm-tinyvm --bin tinyvm -- \
   cartridge check-profile path/to/game.wasm path/to/app-build.tahost --json
+
+cargo run -p agenterm-tinyvm --bin tinyvm --features replay -- \
+  replay check path/to/game.wasm path/to/game.tareplay --json
 ```
 
 `inspect` parses canonical identity/schema metadata and the normal WASM import
@@ -71,6 +74,14 @@ Compatible, incompatible and malformed-input paths all produce one parseable
 object; exit status still distinguishes acceptance from rejection. This is the
 preferred interface for creator sites and CI. The original text output remains
 available for humans and existing scripts.
+
+`replay check ... --json` verifies a representative, author-owned input/clock
+trace rather than only the fixed lifecycle probe. Its versioned
+[`tinyarcade-replay-conformance-report` v1](tinyarcade-replay-conformance-report-v1.md)
+separates trace decoding, exact cartridge binding, runtime initialization and
+per-frame output drift. Creator sites and CI should retain both the fixed
+lifecycle report and one or more meaningful gameplay replay reports; neither
+claim substitutes for the other.
 
 For proposal diagnostics, `tinyvm module validate FILE.wasm` also prints the
 post-MVP families actually used by the accepted bytes as
@@ -214,6 +225,7 @@ The normative wire details remain in:
 - `docs/tinyarcade-cartridge-abi-v1.md`
 - `docs/tinyarcade-cartridge-conformance-report-v1.md`
 - `docs/tinyarcade-host-compatibility-report-v1.md`
+- `docs/tinyarcade-replay-conformance-report-v1.md`
 - `docs/tinyarcade-media-stream-v1.md`
 - `docs/tinyarcade-signed-catalog-v1.md`
 - `docs/tinyarcade-catalog-transport-v1.md`

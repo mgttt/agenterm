@@ -349,6 +349,160 @@ fn replay_cli_records_checks_reproduces_and_never_overwrites() {
     assert!(checked.status.success());
     assert!(String::from_utf8_lossy(&checked.stdout).contains("verified_frames=4"));
 
+    let checked_json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(&wasm_path)
+        .arg(&first)
+        .arg("--json")
+        .output()
+        .expect("check replay JSON through CLI");
+    assert!(checked_json.status.success());
+    assert!(checked_json.stderr.is_empty());
+    let wire: serde_json::Value =
+        serde_json::from_slice(&checked_json.stdout).expect("decode replay conformance JSON");
+    assert_eq!(wire["schema"], "tinyarcade-replay-conformance-report");
+    assert_eq!(wire["schema_version"], 1);
+    assert_eq!(wire["valid"], true);
+    assert_eq!(wire["replay_valid"], true);
+    assert_eq!(wire["cartridge_bound"], true);
+    assert_eq!(wire["identity"]["game_id"], "com.partnernet.depth-well");
+    assert_eq!(wire["cartridge"]["bytes"], 6_116);
+    assert_eq!(wire["cartridge"]["sha256"].as_str().map(str::len), Some(64));
+    assert_eq!(wire["trace"]["bytes"], first_bytes.len());
+    assert_eq!(wire["trace"]["steps"], 4);
+    assert_eq!(wire["evidence"]["verified_frames"], 4);
+    assert_eq!(wire["evidence"]["first_clock_ms"], 0);
+    assert_eq!(wire["evidence"]["final_clock_ms"], 48);
+    assert!(
+        wire["evidence"]["total_render_bytes"]
+            .as_u64()
+            .is_some_and(|n| n > 0)
+    );
+    assert_eq!(wire["error"], serde_json::Value::Null);
+    assert_eq!(wire.as_object().expect("replay report object").len(), 11);
+    assert_eq!(
+        wire["identity"].as_object().expect("replay identity").len(),
+        4
+    );
+    assert_eq!(
+        wire["cartridge"]
+            .as_object()
+            .expect("cartridge artifact")
+            .len(),
+        2
+    );
+    assert_eq!(wire["trace"].as_object().expect("trace artifact").len(), 4);
+    assert_eq!(wire["limits"].as_object().expect("replay limits").len(), 8);
+    assert_eq!(
+        wire["evidence"].as_object().expect("replay evidence").len(),
+        5
+    );
+
+    let repeated_json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(&wasm_path)
+        .arg(&first)
+        .arg("--json")
+        .output()
+        .expect("repeat replay JSON check");
+    assert!(repeated_json.status.success());
+    assert_eq!(repeated_json.stdout, checked_json.stdout);
+    assert!(repeated_json.stderr.is_empty());
+
+    let missing_cartridge = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(directory.path().join("missing.wasm"))
+        .arg(&first)
+        .arg("--json")
+        .output()
+        .expect("reject missing replay cartridge JSON");
+    assert!(!missing_cartridge.status.success());
+    assert!(missing_cartridge.stderr.is_empty());
+    let missing_cartridge_wire: serde_json::Value =
+        serde_json::from_slice(&missing_cartridge.stdout).expect("decode missing cartridge report");
+    assert_eq!(missing_cartridge_wire["cartridge"], serde_json::Value::Null);
+    assert_eq!(missing_cartridge_wire["trace"], serde_json::Value::Null);
+    assert_eq!(missing_cartridge_wire["error"]["stage"], "cartridge_input");
+
+    let missing_trace = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(&wasm_path)
+        .arg(directory.path().join("missing.tareplay"))
+        .arg("--json")
+        .output()
+        .expect("reject missing replay trace JSON");
+    assert!(!missing_trace.status.success());
+    assert!(missing_trace.stderr.is_empty());
+    let missing_trace_wire: serde_json::Value =
+        serde_json::from_slice(&missing_trace.stdout).expect("decode missing trace report");
+    assert_eq!(missing_trace_wire["cartridge"]["bytes"], 6_116);
+    assert_eq!(missing_trace_wire["trace"], serde_json::Value::Null);
+    assert_eq!(missing_trace_wire["error"]["stage"], "replay_input");
+
+    let malformed_path = directory.path().join("malformed.tareplay");
+    std::fs::write(&malformed_path, b"not a replay").expect("write malformed replay");
+    let malformed = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(&wasm_path)
+        .arg(&malformed_path)
+        .arg("--json")
+        .output()
+        .expect("reject malformed replay JSON");
+    assert!(!malformed.status.success());
+    assert!(malformed.stderr.is_empty());
+    let malformed_wire: serde_json::Value =
+        serde_json::from_slice(&malformed.stdout).expect("decode malformed replay report");
+    assert_eq!(malformed_wire["valid"], false);
+    assert_eq!(malformed_wire["replay_valid"], false);
+    assert_eq!(malformed_wire["cartridge_bound"], serde_json::Value::Null);
+    assert_eq!(malformed_wire["identity"], serde_json::Value::Null);
+    assert_eq!(malformed_wire["trace"]["bytes"], 12);
+    assert_eq!(malformed_wire["trace"]["steps"], serde_json::Value::Null);
+    assert_eq!(malformed_wire["error"]["stage"], "replay_decode");
+
+    let changed_wasm_path = directory.path().join("changed-depth-well.wasm");
+    let mut changed_wasm = std::fs::read(&wasm_path).expect("read replay cartridge");
+    changed_wasm.extend_from_slice(&[0, 1, 0]);
+    std::fs::write(&changed_wasm_path, changed_wasm).expect("write changed cartridge");
+    let mismatched = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(&changed_wasm_path)
+        .arg(&first)
+        .arg("--json")
+        .output()
+        .expect("reject mismatched replay JSON");
+    assert!(!mismatched.status.success());
+    assert!(mismatched.stderr.is_empty());
+    let mismatched_wire: serde_json::Value =
+        serde_json::from_slice(&mismatched.stdout).expect("decode mismatched replay report");
+    assert_eq!(mismatched_wire["replay_valid"], true);
+    assert_eq!(mismatched_wire["cartridge_bound"], false);
+    assert_eq!(
+        mismatched_wire["identity"]["game_id"],
+        "com.partnernet.depth-well"
+    );
+    assert_eq!(mismatched_wire["error"]["stage"], "cartridge_binding");
+
+    let drifted_path = directory.path().join("drifted.tareplay");
+    let mut drifted_bytes = first_bytes.clone();
+    *drifted_bytes.last_mut().expect("replay digest byte") ^= 1;
+    std::fs::write(&drifted_path, drifted_bytes).expect("write drifted replay");
+    let drifted = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(&wasm_path)
+        .arg(&drifted_path)
+        .arg("--json")
+        .output()
+        .expect("reject replay output drift JSON");
+    assert!(!drifted.status.success());
+    assert!(drifted.stderr.is_empty());
+    let drifted_wire: serde_json::Value =
+        serde_json::from_slice(&drifted.stdout).expect("decode replay drift report");
+    assert_eq!(drifted_wire["replay_valid"], true);
+    assert_eq!(drifted_wire["cartridge_bound"], true);
+    assert_eq!(drifted_wire["evidence"], serde_json::Value::Null);
+    assert_eq!(drifted_wire["error"]["stage"], "replay_execution");
+
     let overwrite = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
         .args(["replay", "record"])
         .arg(&wasm_path)

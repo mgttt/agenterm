@@ -213,7 +213,8 @@ agenterm-tinyvm (35)                                      [~]
 │   ├── P3 — cartridge authoring ecosystem               [~]
 │   │   ├── converter/conformance ecosystem               [~]
 │   │   │   ├── versioned JSON host-compatibility report   [x]
-│   │   │   └── versioned JSON lifecycle conformance report [x]
+│   │   │   ├── versioned JSON lifecycle conformance report [x]
+│   │   │   └── versioned JSON replay conformance report    [x]
 │   │   ├── fan-authored standard .wasm                   [x]
 │   │   │   └── header-only C core v1 declarations        [x]
 │   │   └── external distribution after Apple approval    [ ]
@@ -468,6 +469,7 @@ Current evidence owners:
 - [Converter conformance](../docs/tinyarcade-converter-conformance-v1.md)
 - [Cartridge conformance report v1](../docs/tinyarcade-cartridge-conformance-report-v1.md)
 - [Host compatibility report v1](../docs/tinyarcade-host-compatibility-report-v1.md)
+- [Replay conformance report v1](../docs/tinyarcade-replay-conformance-report-v1.md)
 - [C cartridge authoring](../docs/tinyarcade-c-authoring-v1.md)
 - [Catalog transport](../docs/tinyarcade-catalog-transport-v1.md)
 - [Catalog publisher](../docs/tinyarcade-catalog-publisher-v1.md)

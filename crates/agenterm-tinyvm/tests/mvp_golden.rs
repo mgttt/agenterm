@@ -638,7 +638,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 155] = [
+const LEAF_TESTS: [(&str, &str); 156] = [
     ("eval(bytes)", "eval_bytes"),
     (
         "eval_wasm(data, globals, locals)",
@@ -1081,6 +1081,10 @@ const LEAF_TESTS: [(&str, &str); 155] = [
     (
         "versioned JSON lifecycle conformance report",
         "dynamic_converter_json_distinguishes_static_media_and_determinism_failures",
+    ),
+    (
+        "versioned JSON replay conformance report",
+        "replay_cli_records_checks_reproduces_and_never_overwrites",
     ),
     (
         "cross-boundary copy/call benchmarks",

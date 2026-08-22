@@ -220,6 +220,33 @@ fn paddle_guard_replay_covers_indexed_frames_and_tones() {
         }),
         "replay Paddle Guard",
     );
+
+    let directory = tempfile::tempdir().expect("temporary Paddle Guard replay report");
+    let wasm_path = directory.path().join("paddle-guard.wasm");
+    let trace_path = directory.path().join("paddle-guard.tareplay");
+    std::fs::write(&wasm_path, &wasm).expect("write Paddle Guard cartridge");
+    std::fs::write(&trace_path, &bytes).expect("write Paddle Guard replay");
+    let report = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(&wasm_path)
+        .arg(&trace_path)
+        .arg("--json")
+        .output()
+        .expect("check Paddle Guard replay JSON");
+    assert!(report.status.success());
+    assert!(report.stderr.is_empty());
+    let wire: serde_json::Value =
+        serde_json::from_slice(&report.stdout).expect("decode Paddle Guard replay JSON");
+    assert_eq!(wire["valid"], true);
+    assert_eq!(wire["identity"]["game_id"], "com.partnernet.paddle-guard");
+    assert_eq!(wire["trace"]["steps"], 4);
+    assert_eq!(wire["evidence"]["verified_frames"], 4);
+    assert!(
+        wire["evidence"]["total_audio_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes > 0),
+        "representative indexed2d replay must retain its real tone output"
+    );
 }
 
 #[test]

@@ -295,4 +295,31 @@ fn signal_lock_replay_is_portable_across_tinyvm_and_browser_oracles() {
         }),
         "replay Signal Lock",
     );
+
+    let directory = tempfile::tempdir().expect("temporary Signal Lock replay report");
+    let wasm_path = directory.path().join("signal-lock.wasm");
+    let trace_path = directory.path().join("signal-lock.tareplay");
+    std::fs::write(&wasm_path, &wasm).expect("write Signal Lock cartridge");
+    std::fs::write(&trace_path, &bytes).expect("write Signal Lock replay");
+    let report = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(&wasm_path)
+        .arg(&trace_path)
+        .arg("--json")
+        .output()
+        .expect("check Signal Lock replay JSON");
+    assert!(report.status.success());
+    assert!(report.stderr.is_empty());
+    let wire: serde_json::Value =
+        serde_json::from_slice(&report.stdout).expect("decode Signal Lock replay JSON");
+    assert_eq!(wire["valid"], true);
+    assert_eq!(wire["identity"]["game_id"], "com.partnernet.signal-lock");
+    assert_eq!(wire["trace"]["steps"], 6);
+    assert_eq!(wire["evidence"]["verified_frames"], 6);
+    assert!(
+        wire["evidence"]["total_audio_bytes"]
+            .as_u64()
+            .is_some_and(|bytes| bytes > 0),
+        "representative Signal Lock replay must retain its tone output"
+    );
 }

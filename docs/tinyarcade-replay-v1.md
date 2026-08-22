@@ -76,12 +76,22 @@ cargo run -p agenterm-tinyvm --bin tinyvm --features replay -- \
 
 cargo run -p agenterm-tinyvm --bin tinyvm --features replay -- \
   replay check path/to/game.wasm path/to/game.tareplay
+
+cargo run -p agenterm-tinyvm --bin tinyvm --features replay -- \
+  replay check path/to/game.wasm path/to/game.tareplay --json
 ```
 
 Recording publishes a new file only and never overwrites an existing trace.
 The repository's Depth Well and Paddle Guard input plans plus asserted trace
 length/SHA-256 values are format goldens for grid3d, indexed2d and real tone
 output.
+
+The optional trailing `--json` emits the stable, versioned
+[`tinyarcade-replay-conformance-report` v1](tinyarcade-replay-conformance-report-v1.md).
+It is the preferred creator-site/CI interface: every report is path- and
+timestamp-free, binds the hashes and sizes of both artifacts, and keeps input,
+decode, binding, initialization and replay-execution failures distinct. Exit
+status remains authoritative; the original text output remains unchanged.
 
 The CLI deliberately uses the private core-only runtime policy. The Rust replay
 API is namespace-neutral: a reviewed cartridge may use future versioned native

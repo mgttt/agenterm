@@ -2803,6 +2803,13 @@ stats. Give failures stable stage identifiers and represent an unevaluated
 determinism claim as `null`, not `false`. Reuse that structured dynamic function
 from publication code so the publisher cannot drift to a weaker duplicate gate.
 
+Representative replay is a third claim, not a larger synonym for lifecycle
+conformance. Its report should distinguish trace decoding, exact artifact
+binding, runtime initialization and generated-frame mismatch, while retaining
+only evidence that was actually established. Keep file paths and timestamps out
+of the wire object so identical `.wasm` plus `.tareplay` bytes produce
+identical CI output.
+
 Boundary benchmarks must measure the direction and ownership operation they
 claim. Host-to-guest calls plus an external memory view do not measure a guest-
 to-host import. Use one validated Wasm fixture with explicit wrapper exports,

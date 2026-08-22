@@ -21,13 +21,15 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "catalog-publisher")]
 use std::collections::{BTreeMap, HashSet};
 
+#[cfg(any(feature = "catalog-publisher", feature = "replay"))]
+use agenterm_tinyvm::cartridge_sha256;
 use agenterm_tinyvm::{
     CartridgeDescriptor, CartridgeManifest, ExecutionStats, GameInput, GameLimits, GameRuntime,
     HostProfileV1, Limits, MAX_HOST_PROFILE_BYTES, RenderFrame, ToneBatch, Vm, WasmError,
     WasmFeatureUsage, WasmModule,
 };
 #[cfg(feature = "catalog-publisher")]
-use agenterm_tinyvm::{CartridgeTrustStore, CatalogEntry, cartridge_sha256};
+use agenterm_tinyvm::{CartridgeTrustStore, CatalogEntry};
 #[cfg(feature = "replay")]
 use agenterm_tinyvm::{MAX_REPLAY_BYTES, ReplayRecorderV1, ReplayTraceV1};
 
@@ -143,7 +145,12 @@ fn main() -> ExitCode {
                     run_replay_record(&wasm, &inputs, &output)
                 }
                 (Some("check"), Some(wasm), Some(trace), None, None) => {
-                    run_replay_check(&wasm, &trace)
+                    run_replay_check(&wasm, &trace, ReportFormat::Text)
+                }
+                (Some("check"), Some(wasm), Some(trace), Some(format), None)
+                    if format == "--json" =>
+                {
+                    run_replay_check(&wasm, &trace, ReportFormat::Json)
                 }
                 _ => usage(),
             }
@@ -185,7 +192,7 @@ fn usage() -> ExitCode {
     #[cfg(feature = "replay")]
     {
         eprintln!("  tinyvm replay record FILE.wasm INPUTS.txt OUTPUT.tareplay");
-        eprintln!("  tinyvm replay check FILE.wasm TRACE.tareplay");
+        eprintln!("  tinyvm replay check FILE.wasm TRACE.tareplay [--json]");
     }
     ExitCode::FAILURE
 }
@@ -292,40 +299,282 @@ fn run_replay_record(wasm_path: &str, inputs_path: &str, output_path: &str) -> E
 }
 
 #[cfg(feature = "replay")]
-fn run_replay_check(wasm_path: &str, trace_path: &str) -> ExitCode {
-    let result: Result<(String, String, usize), String> = (|| {
-        let wasm = read_bounded_regular(Path::new(wasm_path), MAX_CARTRIDGE_BYTES, "cartridge")?;
-        let bytes = read_bounded_regular(
-            Path::new(trace_path),
-            MAX_REPLAY_BYTES as u64,
-            "replay trace",
-        )?;
-        let trace = ReplayTraceV1::decode(&bytes).map_err(|error| error.message().to_string())?;
-        trace
-            .verify_cartridge(&wasm)
-            .map_err(|error| error.message().to_string())?;
-        let mut runtime = replay_runtime(&wasm)?;
-        let mut frames = 0usize;
-        trace
-            .replay(&wasm, &mut runtime, |_, _| {
-                frames += 1;
-                Ok(())
-            })
-            .map_err(|error| error.message().to_string())?;
-        Ok((trace.game_id, trace.game_version, frames))
-    })();
-    match result {
-        Ok((game_id, version, frames)) => {
-            println!("game_id={game_id}");
-            println!("game_version={version}");
-            println!("verified_frames={frames}");
-            println!("OK: replay matches exact cartridge outputs");
-            ExitCode::SUCCESS
-        }
+fn run_replay_check(wasm_path: &str, trace_path: &str, format: ReportFormat) -> ExitCode {
+    let wasm = match read_bounded_regular(Path::new(wasm_path), MAX_CARTRIDGE_BYTES, "cartridge") {
+        Ok(bytes) => bytes,
         Err(message) => {
-            eprintln!("tinyvm: {message}");
-            ExitCode::FAILURE
+            return replay_check_failure(
+                format,
+                None,
+                None,
+                None,
+                "cartridge_input",
+                &message,
+                None,
+            );
         }
+    };
+    let trace_bytes = match read_bounded_regular(
+        Path::new(trace_path),
+        MAX_REPLAY_BYTES as u64,
+        "replay trace",
+    ) {
+        Ok(bytes) => bytes,
+        Err(message) => {
+            return replay_check_failure(
+                format,
+                Some(&wasm),
+                None,
+                None,
+                "replay_input",
+                &message,
+                None,
+            );
+        }
+    };
+    let trace = match ReplayTraceV1::decode(&trace_bytes) {
+        Ok(trace) => trace,
+        Err(error) => {
+            return replay_check_failure(
+                format,
+                Some(&wasm),
+                Some(&trace_bytes),
+                None,
+                "replay_decode",
+                error.message(),
+                None,
+            );
+        }
+    };
+    if let Err(error) = trace.verify_cartridge(&wasm) {
+        return replay_check_failure(
+            format,
+            Some(&wasm),
+            Some(&trace_bytes),
+            Some(&trace),
+            "cartridge_binding",
+            error.message(),
+            Some(false),
+        );
+    }
+    let mut runtime = match replay_runtime(&wasm) {
+        Ok(runtime) => runtime,
+        Err(message) => {
+            return replay_check_failure(
+                format,
+                Some(&wasm),
+                Some(&trace_bytes),
+                Some(&trace),
+                "initialization",
+                &message,
+                Some(true),
+            );
+        }
+    };
+    let mut evidence = ReplayConformanceEvidence::default();
+    if let Err(error) = trace.replay(&wasm, &mut runtime, |_, frame| {
+        evidence.verified_frames += 1;
+        evidence.total_render_bytes += frame.render.len() as u64;
+        evidence.total_audio_bytes += frame.audio.len() as u64;
+        Ok(())
+    }) {
+        return replay_check_failure(
+            format,
+            Some(&wasm),
+            Some(&trace_bytes),
+            Some(&trace),
+            "replay_execution",
+            error.message(),
+            Some(true),
+        );
+    }
+    match format {
+        ReportFormat::Json => println!(
+            "{}",
+            replay_conformance_report_json(&wasm, &trace_bytes, &trace, evidence)
+        ),
+        ReportFormat::Text => {
+            println!("game_id={}", trace.game_id);
+            println!("game_version={}", trace.game_version);
+            println!("verified_frames={}", evidence.verified_frames);
+            println!("OK: replay matches exact cartridge outputs");
+        }
+    }
+    ExitCode::SUCCESS
+}
+
+#[cfg(feature = "replay")]
+#[derive(Clone, Copy, Default)]
+struct ReplayConformanceEvidence {
+    verified_frames: usize,
+    total_render_bytes: u64,
+    total_audio_bytes: u64,
+}
+
+#[cfg(feature = "replay")]
+fn replay_check_failure(
+    format: ReportFormat,
+    wasm: Option<&[u8]>,
+    trace_bytes: Option<&[u8]>,
+    trace: Option<&ReplayTraceV1>,
+    stage: &'static str,
+    message: &str,
+    cartridge_bound: Option<bool>,
+) -> ExitCode {
+    match format {
+        ReportFormat::Json => println!(
+            "{}",
+            replay_conformance_error_json(
+                wasm,
+                trace_bytes,
+                trace,
+                stage,
+                message,
+                cartridge_bound,
+            )
+        ),
+        ReportFormat::Text => eprintln!("tinyvm: {message}"),
+    }
+    ExitCode::FAILURE
+}
+
+#[cfg(feature = "replay")]
+fn replay_conformance_report_json(
+    wasm: &[u8],
+    trace_bytes: &[u8],
+    trace: &ReplayTraceV1,
+    evidence: ReplayConformanceEvidence,
+) -> String {
+    let mut output = replay_conformance_json_prefix(true, true, Some(true));
+    push_replay_identity_json(&mut output, Some(trace));
+    output.push_str(",\"cartridge\":");
+    push_hashed_artifact_json(&mut output, wasm);
+    output.push_str(",\"trace\":");
+    push_replay_trace_json(&mut output, trace_bytes, Some(trace));
+    output.push_str(",\"limits\":");
+    push_converter_limits_json(&mut output);
+    output.push_str(",\"evidence\":{\"verified_frames\":");
+    output.push_str(&evidence.verified_frames.to_string());
+    output.push_str(",\"total_render_bytes\":");
+    output.push_str(&evidence.total_render_bytes.to_string());
+    output.push_str(",\"total_audio_bytes\":");
+    output.push_str(&evidence.total_audio_bytes.to_string());
+    output.push_str(",\"first_clock_ms\":");
+    push_json_option_u32(
+        &mut output,
+        trace.steps.first().map(|step| step.input.clock_ms),
+    );
+    output.push_str(",\"final_clock_ms\":");
+    push_json_option_u32(
+        &mut output,
+        trace.steps.last().map(|step| step.input.clock_ms),
+    );
+    output.push_str("},\"error\":null}");
+    output
+}
+
+#[cfg(feature = "replay")]
+fn replay_conformance_error_json(
+    wasm: Option<&[u8]>,
+    trace_bytes: Option<&[u8]>,
+    trace: Option<&ReplayTraceV1>,
+    stage: &str,
+    message: &str,
+    cartridge_bound: Option<bool>,
+) -> String {
+    let mut output = replay_conformance_json_prefix(false, trace.is_some(), cartridge_bound);
+    push_replay_identity_json(&mut output, trace);
+    output.push_str(",\"cartridge\":");
+    match wasm {
+        Some(bytes) => push_hashed_artifact_json(&mut output, bytes),
+        None => output.push_str("null"),
+    }
+    output.push_str(",\"trace\":");
+    match trace_bytes {
+        Some(bytes) => push_replay_trace_json(&mut output, bytes, trace),
+        None => output.push_str("null"),
+    }
+    output.push_str(",\"limits\":");
+    push_converter_limits_json(&mut output);
+    output.push_str(",\"evidence\":null,\"error\":{\"stage\":");
+    push_json_string(&mut output, stage);
+    output.push_str(",\"message\":");
+    push_json_string(&mut output, message);
+    output.push_str("}}");
+    output
+}
+
+#[cfg(feature = "replay")]
+fn replay_conformance_json_prefix(
+    valid: bool,
+    replay_valid: bool,
+    cartridge_bound: Option<bool>,
+) -> String {
+    let mut output = String::from(
+        "{\"schema\":\"tinyarcade-replay-conformance-report\",\"schema_version\":1,\"valid\":",
+    );
+    output.push_str(if valid { "true" } else { "false" });
+    output.push_str(",\"replay_valid\":");
+    output.push_str(if replay_valid { "true" } else { "false" });
+    output.push_str(",\"cartridge_bound\":");
+    match cartridge_bound {
+        Some(value) => output.push_str(if value { "true" } else { "false" }),
+        None => output.push_str("null"),
+    }
+    output.push_str(",\"identity\":");
+    output
+}
+
+#[cfg(feature = "replay")]
+fn push_replay_identity_json(output: &mut String, trace: Option<&ReplayTraceV1>) {
+    let Some(trace) = trace else {
+        output.push_str("null");
+        return;
+    };
+    output.push_str("{\"game_id\":");
+    push_json_string(output, &trace.game_id);
+    output.push_str(",\"game_version\":");
+    push_json_string(output, &trace.game_version);
+    output.push_str(",\"abi_version\":");
+    output.push_str(&trace.abi_version.to_string());
+    output.push_str(",\"state_version\":");
+    output.push_str(&trace.state_version.to_string());
+    output.push('}');
+}
+
+#[cfg(feature = "replay")]
+fn push_hashed_artifact_json(output: &mut String, bytes: &[u8]) {
+    output.push_str("{\"bytes\":");
+    output.push_str(&bytes.len().to_string());
+    output.push_str(",\"sha256\":");
+    push_json_string(output, &lower_hex(&cartridge_sha256(bytes)));
+    output.push('}');
+}
+
+#[cfg(feature = "replay")]
+fn push_replay_trace_json(output: &mut String, bytes: &[u8], trace: Option<&ReplayTraceV1>) {
+    output.push_str("{\"bytes\":");
+    output.push_str(&bytes.len().to_string());
+    output.push_str(",\"sha256\":");
+    push_json_string(output, &lower_hex(&cartridge_sha256(bytes)));
+    output.push_str(",\"initial_snapshot_bytes\":");
+    match trace {
+        Some(trace) => output.push_str(&trace.initial_snapshot.len().to_string()),
+        None => output.push_str("null"),
+    }
+    output.push_str(",\"steps\":");
+    match trace {
+        Some(trace) => output.push_str(&trace.steps.len().to_string()),
+        None => output.push_str("null"),
+    }
+    output.push('}');
+}
+
+#[cfg(feature = "replay")]
+fn push_json_option_u32(output: &mut String, value: Option<u32>) {
+    match value {
+        Some(value) => output.push_str(&value.to_string()),
+        None => output.push_str("null"),
     }
 }
 
@@ -333,13 +582,8 @@ fn run_replay_check(wasm_path: &str, trace_path: &str) -> ExitCode {
 fn replay_runtime(wasm: &[u8]) -> Result<GameRuntime, String> {
     GameRuntime::from_private_bytes(
         wasm,
-        Limits {
-            max_table_elems: 1_024,
-            max_memory_pages: 64,
-            max_steps: 1_000_000,
-            ..Limits::default()
-        },
-        GameLimits::default(),
+        converter_vm_limits(),
+        converter_game_limits(),
         0x5441_5231,
     )
     .map_err(|error| error.message().to_string())
@@ -755,7 +999,7 @@ fn valid_language_tag(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
-#[cfg(feature = "catalog-publisher")]
+#[cfg(any(feature = "catalog-publisher", feature = "replay"))]
 fn lower_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut result = String::with_capacity(bytes.len() * 2);
