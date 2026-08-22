@@ -8,6 +8,15 @@ const LEFT: [i16; 8] = [30_000, -30_000, 100, -100, 32_767, -32_768, 20_000, -20
 const RIGHT: [i16; 8] = [10_000, -10_000, 200, -200, 1, -1, -25_000, 25_000];
 const EXPECTED: [i16; 8] = [32_767, -32_768, 300, -300, 32_767, -32_768, -5_000, 5_000];
 const EXPECTED_SUBTRACT: [i16; 8] = [20_000, -20_000, -100, 100, 32_766, -32_767, 32_767, -32_768];
+const LOGIC_LEFT: [u8; 16] = [
+    0x00, 0xff, 0x0f, 0xf0, 0xaa, 0x55, 0x81, 0x7e, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0,
+];
+const LOGIC_RIGHT: [u8; 16] = [
+    0xff, 0x00, 0x33, 0x55, 0x0f, 0xf0, 0x7e, 0x81, 0x87, 0x65, 0x43, 0x21, 0xfe, 0xdc, 0xba, 0x98,
+];
+const LOGIC_MASK: [u8; 16] = [
+    0xff, 0xff, 0x00, 0x00, 0xf0, 0x0f, 0xaa, 0x55, 0xcc, 0x33, 0x5a, 0xa5, 0x80, 0x01, 0x7f, 0xfe,
+];
 
 fn must<T>(result: Result<T, WasmError>, context: &str) -> T {
     result.unwrap_or_else(|error| panic!("{context}: {}", error.message()))
@@ -27,9 +36,25 @@ fn read_samples(memory: &[u8], offset: usize) -> [i16; 8] {
     })
 }
 
+fn expected_logic() -> [[u8; 16]; 6] {
+    core::array::from_fn(|operation| {
+        core::array::from_fn(|index| match operation {
+            0 => LOGIC_LEFT[index] & LOGIC_RIGHT[index],
+            1 => LOGIC_LEFT[index] | LOGIC_RIGHT[index],
+            2 => LOGIC_LEFT[index] ^ LOGIC_RIGHT[index],
+            3 => LOGIC_LEFT[index] & !LOGIC_RIGHT[index],
+            4 => !LOGIC_LEFT[index],
+            5 => {
+                (LOGIC_LEFT[index] & LOGIC_MASK[index]) | (LOGIC_RIGHT[index] & !LOGIC_MASK[index])
+            }
+            _ => unreachable!(),
+        })
+    })
+}
+
 #[test]
 #[ignore = "run through smoke-wabt-simd-audio.sh with an independently compiled fixture"]
-fn wabt_compiled_simd_audio_add_sub_matches_tinyvm() {
+fn wabt_compiled_simd_audio_and_masks_match_tinyvm() {
     let path = PathBuf::from(
         std::env::var_os("TINYVM_WABT_SIMD_WASM")
             .expect("TINYVM_WABT_SIMD_WASM is set by the smoke script"),
@@ -76,6 +101,43 @@ fn wabt_compiled_simd_audio_add_sub_matches_tinyvm() {
             tail_before
         );
     }
+
+    {
+        let mut memory = must(instance.memory_mut(), "borrow SIMD mask memory");
+        memory[0..16].copy_from_slice(&LOGIC_LEFT);
+        memory[16..32].copy_from_slice(&LOGIC_RIGHT);
+        memory[32..48].copy_from_slice(&LOGIC_MASK);
+        memory[64..192].fill(0);
+    }
+    must(
+        instance.invoke_by_name(
+            "logic",
+            &[Val::I32(0), Val::I32(16), Val::I32(32), Val::I32(64)],
+        ),
+        "run SIMD mask kernel",
+    );
+    let memory = must(instance.memory(), "read SIMD mask results");
+    for (operation, expected) in expected_logic().iter().enumerate() {
+        let start = 64 + operation * 16;
+        assert_eq!(&memory[start..start + 16], expected);
+    }
+    drop(memory);
+    assert!(matches!(
+        must(
+            instance.invoke_by_name("any", &[Val::I32(0)]),
+            "test nonzero vector"
+        )
+        .as_slice(),
+        [Val::I32(1)]
+    ));
+    assert!(matches!(
+        must(
+            instance.invoke_by_name("any", &[Val::I32(176)]),
+            "test zero vector"
+        )
+        .as_slice(),
+        [Val::I32(0)]
+    ));
 }
 
 #[test]
@@ -89,6 +151,31 @@ fn unsupported_simd_instruction_fails_during_decode() {
         Ok(_) => panic!("unsupported SIMD must fail at load"),
     };
     assert_eq!(error.message(), "unsupported 0xfd opcode");
+}
+
+#[test]
+fn v128_mask_validation_rejects_scalar_and_missing_operands() {
+    for (source, expected) in [
+        (
+            "(module (func (result v128) i32.const 1 i32.const 2 v128.and))",
+            "validation: type mismatch",
+        ),
+        (
+            "(module (func (result v128) v128.const i32x4 0 0 0 0 v128.const i32x4 0 0 0 0 v128.bitselect))",
+            "validation: operand stack underflow",
+        ),
+        (
+            "(module (func (result i32) i32.const 1 v128.any_true))",
+            "validation: type mismatch",
+        ),
+    ] {
+        let bytes = wat::parse_str(source).expect("encode invalid SIMD type fixture");
+        let error = match WasmModule::from_bytes(&bytes) {
+            Err(error) => error,
+            Ok(_) => panic!("invalid SIMD mask operands must fail at load"),
+        };
+        assert_eq!(error.message(), expected);
+    }
 }
 
 #[test]

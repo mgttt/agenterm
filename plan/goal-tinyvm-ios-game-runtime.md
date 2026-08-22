@@ -4421,3 +4421,32 @@ passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
 journey and an arm64 device Release build. Physical-iPhone lifecycle and
 TestFlight install/play evidence remain open, so the persistent goal stays
 active.
+
+## One-hundred-forty-third executable increment — whole-vector SIMD masks
+
+The optional standard SIMD profile now implements the coherent whole-vector
+mask core: `v128.not`, `and`, `andnot`, `or`, `xor`, `bitselect` and
+`any_true`. Validation groups their exact unary, binary, ternary and
+vector-to-scalar signatures, while execution uses portable `[u8; 16]`
+semantics rather than host-specific intrinsics. The default product profile
+still rejects SIMD, and unsupported lane instructions continue to fail during
+decoding; this remains an explicit game-kernel subset rather than a false claim
+of complete proposal support.
+
+Evidence on 2026-08-22: WABT compiles and validates one 270-byte memory kernel;
+tinyvm, JavaScriptCore and a real headless H5 browser agree on six nontrivial
+mask vectors, signed saturating PCM lanes and both zero/nonzero `any_true`
+results. Independent invalid modules reject scalar operands and a missing
+`bitselect` input at load time. The 145-claim executable PRD map, complete
+all-feature suite, warnings-denied Clippy, rustfmt, ShellCheck, ten-family
+standard matrix and four-cartridge JSC/H5 differential pass. Default and SIMD
+static cores remain unchanged at 101,256 and 117,768 bytes. Default iOS
+consumers link at 1,797,640 bytes arm64 and 1,895,176 bytes x86_64; opt-in SIMD
+consumers link at 1,798,616 / 1,899,200 bytes, with the focused SIMD execution
+owner at 1,621,832 bytes. The real Nostalgia Arcade consumer rebuilds the exact
+default archive (SHA-256
+`1e0cb4711277a376b1e360fe080fd8f146425aedaa4fcc50cf64bb755ef80c8c`),
+passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
+journey and an arm64 device Release build. Physical-iPhone lifecycle and
+TestFlight install/play evidence remain open, so the persistent goal stays
+active.

@@ -1547,6 +1547,20 @@ enum Op {
     #[cfg(feature = "simd")]
     V128Const([u8; 16]),
     #[cfg(feature = "simd")]
+    V128Not,
+    #[cfg(feature = "simd")]
+    V128And,
+    #[cfg(feature = "simd")]
+    V128AndNot,
+    #[cfg(feature = "simd")]
+    V128Or,
+    #[cfg(feature = "simd")]
+    V128Xor,
+    #[cfg(feature = "simd")]
+    V128Bitselect,
+    #[cfg(feature = "simd")]
+    V128AnyTrue,
+    #[cfg(feature = "simd")]
     I16x8AddSatS,
     #[cfg(feature = "simd")]
     I16x8SubSatS,
@@ -1997,6 +2011,13 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                             i = end;
                             ops.push(Op::V128Const(value));
                         }
+                        77 => ops.push(Op::V128Not),
+                        78 => ops.push(Op::V128And),
+                        79 => ops.push(Op::V128AndNot),
+                        80 => ops.push(Op::V128Or),
+                        81 => ops.push(Op::V128Xor),
+                        82 => ops.push(Op::V128Bitselect),
+                        83 => ops.push(Op::V128AnyTrue),
                         143 => ops.push(Op::I16x8AddSatS),
                         146 => ops.push(Op::I16x8SubSatS),
                         _ => return Err(WasmError::Decode("unsupported 0xfd opcode")),
@@ -4826,6 +4847,13 @@ impl Module {
                     Op::V128Load(_)
                     | Op::V128Store(_)
                     | Op::V128Const(_)
+                    | Op::V128Not
+                    | Op::V128And
+                    | Op::V128AndNot
+                    | Op::V128Or
+                    | Op::V128Xor
+                    | Op::V128Bitselect
+                    | Op::V128AnyTrue
                     | Op::I16x8AddSatS
                     | Op::I16x8SubSatS => usage.simd = true,
                     _ => {}
@@ -6695,6 +6723,46 @@ impl Module {
                     let mut memory = selected_memory_mut(memories, arg.memory)?;
                     let ea = mem_ea(memory.len(), address, arg.offset, 16)?;
                     memory[ea..ea + 16].copy_from_slice(&value);
+                }
+                #[cfg(feature = "simd")]
+                Op::V128Not => {
+                    let mut value = pop_v128(&mut stack)?;
+                    for byte in &mut value {
+                        *byte = !*byte;
+                    }
+                    stack.push(Val::V128(value));
+                }
+                #[cfg(feature = "simd")]
+                operation @ (Op::V128And | Op::V128AndNot | Op::V128Or | Op::V128Xor) => {
+                    let right = pop_v128(&mut stack)?;
+                    let left = pop_v128(&mut stack)?;
+                    let mut value = [0; 16];
+                    for index in 0..16 {
+                        value[index] = match operation {
+                            Op::V128And => left[index] & right[index],
+                            Op::V128AndNot => left[index] & !right[index],
+                            Op::V128Or => left[index] | right[index],
+                            Op::V128Xor => left[index] ^ right[index],
+                            _ => unreachable!(),
+                        };
+                    }
+                    stack.push(Val::V128(value));
+                }
+                #[cfg(feature = "simd")]
+                Op::V128Bitselect => {
+                    let mask = pop_v128(&mut stack)?;
+                    let right = pop_v128(&mut stack)?;
+                    let left = pop_v128(&mut stack)?;
+                    let mut value = [0; 16];
+                    for index in 0..16 {
+                        value[index] = (left[index] & mask[index]) | (right[index] & !mask[index]);
+                    }
+                    stack.push(Val::V128(value));
+                }
+                #[cfg(feature = "simd")]
+                Op::V128AnyTrue => {
+                    let value = pop_v128(&mut stack)?;
+                    stack.push(Val::I32(value.iter().any(|&byte| byte != 0) as i32));
                 }
                 #[cfg(feature = "simd")]
                 Op::I16x8AddSatS => {

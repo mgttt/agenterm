@@ -2860,3 +2860,15 @@ the value and identity cannot change after instantiation, so the result is
 observationally identical to eager evaluation. Keep only passive-segment
 liveness as extra instance state. Test active and passive identity together,
 plus the immutable host-write rejection that makes this compact model sound.
+
+## Whole-vector SIMD does not require host intrinsics
+
+The standard `v128` bitwise family has exact byte semantics, so a portable VM
+can implement `not`, binary logic and `bitselect` directly over `[u8; 16]`.
+This keeps the interpreter independent of ARM/Intel intrinsics and gives every
+host the same result. Group instructions by validation signature—unary vector,
+binary vector, ternary vector and vector-to-`i32` test—then keep execution's
+stack pop order explicit. In particular, `bitselect` pops mask, second input,
+then first input and computes `(first & mask) | (second & !mask)` per byte.
+Cross-check nontrivial masks in WABT, JavaScriptCore and a browser; all-zero and
+nonzero vectors should independently pin `v128.any_true`.

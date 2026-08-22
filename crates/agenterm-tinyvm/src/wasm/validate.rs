@@ -416,10 +416,27 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.pop_expect(I32)?;
         }
         #[cfg(feature = "simd")]
-        I16x8AddSatS | I16x8SubSatS => {
+        V128Not => {
+            v.pop_expect(V128)?;
+            v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        V128And | V128AndNot | V128Or | V128Xor | I16x8AddSatS | I16x8SubSatS => {
             v.pop_expect(V128)?;
             v.pop_expect(V128)?;
             v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        V128Bitselect => {
+            v.pop_expect(V128)?;
+            v.pop_expect(V128)?;
+            v.pop_expect(V128)?;
+            v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        V128AnyTrue => {
+            v.pop_expect(V128)?;
+            v.push(I32);
         }
 
         // --- i32 unary / binary / comparison ---
