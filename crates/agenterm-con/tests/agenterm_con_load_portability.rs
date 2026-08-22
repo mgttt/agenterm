@@ -57,6 +57,9 @@ const LOAD_TIME_BLOCKERS: &[(&str, &str)] = &[
 const OS_PROVIDED_MODULES: &[&str] = &[
     "advapi32.dll",
     "api-ms-win-core-synch-l1-2-0.dll",
+    // The Universal CRT. Deliberately still dynamic: it ships with Windows,
+    // so linking it statically would cost bytes to duplicate something the
+    // target already has.
     "api-ms-win-crt-heap-l1-1-0.dll",
     "api-ms-win-crt-runtime-l1-1-0.dll",
     "api-ms-win-crt-string-l1-1-0.dll",
@@ -70,19 +73,15 @@ const OS_PROVIDED_MODULES: &[&str] = &[
 ];
 
 /// Modules that are *not* OS components and must be installed or shipped
-/// beside the executable, tolerated here only because removing them is a
-/// separate piece of work.
+/// beside the executable.
 ///
-/// `VCRUNTIME140.dll` carries six leaves — the `mem*` family plus
-/// `__CxxFrameHandler3`/`_CxxThrowException` — and is absent from a clean
-/// Windows Server 2016 until the Visual C++ redistributable is installed.
-/// Linking it statically is not a build-flag change: `agenterm-con` supplies
-/// its own PE entry point (`startup.rs`) and does not run the static CRT's
-/// `__security_init_cookie`/`__vcrt_initialize`, so `static=libvcruntime`
-/// links but dies at `STATUS_STACK_BUFFER_OVERRUN` on the first test. Kept
-/// listed, and separate from `OS_PROVIDED_MODULES`, so the remaining gap is
-/// visible in code instead of remembered.
-const KNOWN_NON_OS_MODULES: &[&str] = &["vcruntime140.dll"];
+/// Empty, and that is the point: `VCRUNTIME140.dll` used to be here. It is a
+/// redistributable, absent from a clean Windows Server 2016 until someone
+/// installs the Visual C++ runtime, and it is now linked statically instead
+/// (see `build.rs` and `startup.rs::__vcrt_initialize`). An empty list is
+/// what makes a future redistributable dependency turn this gate red rather
+/// than quietly widening what a user has to install.
+const KNOWN_NON_OS_MODULES: &[&str] = &[];
 
 fn shipped_binary() -> PathBuf {
     // An integration test runs from `target/<profile>/deps/`, so the binary
