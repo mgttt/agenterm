@@ -28,14 +28,17 @@ struct SimdAudioOracle {
               samples.set([30000,-30000,100,-100,32767,-32768,20000,-20000], 0);
               samples.set([10000,-10000,200,-200,1,-1,-25000,25000], 8);
               instance.exports.mix(0, 16, 32);
-              return Array.from(samples.slice(16, 24)).join(',');
+              const added = Array.from(samples.slice(16, 24)).join(',');
+              instance.exports.subtract(0, 16, 32);
+              const subtracted = Array.from(samples.slice(16, 24)).join(',');
+              return `${added}|${subtracted}`;
             })()
             """
         )
         if let javascriptError { throw OracleError.javascript(javascriptError) }
         let result = value?.toString() ?? ""
-        let expected = "32767,-32768,300,-300,32767,-32768,-5000,5000"
+        let expected = "32767,-32768,300,-300,32767,-32768,-5000,5000|20000,-20000,-100,100,32766,-32767,32767,-32768"
         guard result == expected else { throw OracleError.wrongResult(result) }
-        print("OK: JavaScriptCore SIMD audio mix=\(result)")
+        print("OK: JavaScriptCore SIMD audio add/sub=\(result)")
     }
 }

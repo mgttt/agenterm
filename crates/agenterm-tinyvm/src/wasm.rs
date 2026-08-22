@@ -1451,7 +1451,7 @@ enum Op {
     F32Load(MemArg),
     F32Store(MemArg),
     /// Initial game-oriented SIMD subset: full-width memory traffic plus
-    /// signed saturating PCM-lane addition.
+    /// signed saturating PCM-lane addition and subtraction.
     #[cfg(feature = "simd")]
     V128Load(MemArg),
     #[cfg(feature = "simd")]
@@ -1460,6 +1460,8 @@ enum Op {
     V128Const([u8; 16]),
     #[cfg(feature = "simd")]
     I16x8AddSatS,
+    #[cfg(feature = "simd")]
+    I16x8SubSatS,
     /// `global.get` / `global.set` — read/write a module global by index.
     GlobalGet(u32),
     GlobalSet(u32),
@@ -1908,6 +1910,7 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                             ops.push(Op::V128Const(value));
                         }
                         143 => ops.push(Op::I16x8AddSatS),
+                        146 => ops.push(Op::I16x8SubSatS),
                         _ => return Err(WasmError::Decode("unsupported 0xfd opcode")),
                     }
                 }
@@ -4706,9 +4709,11 @@ impl Module {
                     | Op::RefFunc(_) => usage.reference_types = true,
                     Op::ReturnCall(_) | Op::ReturnCallIndirect { .. } => usage.tail_call = true,
                     #[cfg(feature = "simd")]
-                    Op::V128Load(_) | Op::V128Store(_) | Op::V128Const(_) | Op::I16x8AddSatS => {
-                        usage.simd = true
-                    }
+                    Op::V128Load(_)
+                    | Op::V128Store(_)
+                    | Op::V128Const(_)
+                    | Op::I16x8AddSatS
+                    | Op::I16x8SubSatS => usage.simd = true,
                     _ => {}
                 }
             }
@@ -6587,6 +6592,19 @@ impl Module {
                         let a = i16::from_le_bytes([left[start], left[start + 1]]);
                         let b = i16::from_le_bytes([right[start], right[start + 1]]);
                         mixed[start..start + 2].copy_from_slice(&a.saturating_add(b).to_le_bytes());
+                    }
+                    stack.push(Val::V128(mixed));
+                }
+                #[cfg(feature = "simd")]
+                Op::I16x8SubSatS => {
+                    let right = pop_v128(&mut stack)?;
+                    let left = pop_v128(&mut stack)?;
+                    let mut mixed = [0; 16];
+                    for lane in 0..8 {
+                        let start = lane * 2;
+                        let a = i16::from_le_bytes([left[start], left[start + 1]]);
+                        let b = i16::from_le_bytes([right[start], right[start + 1]]);
+                        mixed[start..start + 2].copy_from_slice(&a.saturating_sub(b).to_le_bytes());
                     }
                     stack.push(Val::V128(mixed));
                 }

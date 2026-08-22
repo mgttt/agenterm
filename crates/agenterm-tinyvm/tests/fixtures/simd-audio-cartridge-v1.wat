@@ -43,6 +43,29 @@
       i32.const 3
       return
     end
+
+    i32.const 64
+    v128.const i16x8 30000 -30000 100 -100 32767 -32768 20000 -20000
+    v128.const i16x8 10000 -10000 200 -200 1 -1 -25000 25000
+    i16x8.sub_sat_s
+    v128.store
+
+    i32.const 76
+    i32.load16_s
+    i32.const 32767
+    i32.ne
+    if
+      i32.const 4
+      return
+    end
+    i32.const 78
+    i32.load16_s
+    i32.const -32768
+    i32.ne
+    if
+      i32.const 5
+      return
+    end
     i32.const 0)
 
   (func (export "game_tick") (result i32)

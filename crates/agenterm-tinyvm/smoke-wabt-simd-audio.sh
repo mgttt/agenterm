@@ -26,7 +26,7 @@ CARGO="$CARGO" CARGO_TARGET_DIR="$TEMP/core-target" \
 
 TINYVM_WABT_SIMD_WASM="$WASM" "$CARGO" test -q -p agenterm-tinyvm \
   --features simd --test wabt_simd_audio_oracle \
-  wabt_compiled_simd_audio_mix_matches_tinyvm -- --ignored --exact
+  wabt_compiled_simd_audio_add_sub_matches_tinyvm -- --ignored --exact
 
 xcrun swiftc -parse-as-library -warnings-as-errors -O -framework JavaScriptCore \
   "$CRATE/tests/webkit/SimdAudioOracle.swift" -o "$ORACLE"
@@ -52,5 +52,5 @@ if ! grep -Fq 'data-status="pass"' "$DOM"; then
   sed -n '1,120p' "$LOG" >&2
   exit 1
 fi
-sed -n 's/.*\(OK: H5 SIMD audio mix=[^<]*\).*/\1/p' "$DOM"
-echo 'OK: WABT, tinyvm, JavaScriptCore and H5 agree on SIMD audio mixing'
+sed -n 's/.*\(OK: H5 SIMD audio add\/sub=[^<]*\).*/\1/p' "$DOM"
+echo 'OK: WABT, tinyvm, JavaScriptCore and H5 agree on SIMD audio add/subtract'

@@ -638,7 +638,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 132] = [
+const LEAF_TESTS: [(&str, &str); 133] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -1051,7 +1051,11 @@ const LEAF_TESTS: [(&str, &str); 132] = [
     ),
     (
         "optional SIMD signed-PCM mix subset",
-        "wabt_compiled_simd_audio_mix_matches_tinyvm",
+        "wabt_compiled_simd_audio_add_sub_matches_tinyvm",
+    ),
+    (
+        "signed PCM saturating add/sub",
+        "wabt_compiled_simd_audio_add_sub_matches_tinyvm",
     ),
     (
         "fan-authored standard .wasm",

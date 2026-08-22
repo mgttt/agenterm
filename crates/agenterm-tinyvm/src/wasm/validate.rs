@@ -403,7 +403,7 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.pop_expect(I32)?;
         }
         #[cfg(feature = "simd")]
-        I16x8AddSatS => {
+        I16x8AddSatS | I16x8SubSatS => {
             v.pop_expect(V128)?;
             v.pop_expect(V128)?;
             v.push(V128);

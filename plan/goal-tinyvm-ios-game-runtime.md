@@ -34,6 +34,7 @@ tinyvm iOS game runtime
 │   │   ├── opaque externref function/global values [x]
 │   │   └── standard externref tables [x]
 │   ├── standard tail calls            [x]
+│   ├── optional SIMD PCM add/sub       [x]
 │   ├── typed standard host imports     [x]
 │   ├── strict declared-memory semantics [x]
 │   ├── strict scalar memarg alignment [x]
@@ -4138,3 +4139,23 @@ input budgets; opt-in SIMD passes at 1,766,824 / 1,852,040 bytes. The
 executable PRD trace now binds 132 completed claims.
 Physical keyboard behavior remains an open device evidence leaf, so the
 persistent goal stays active.
+
+## One-hundred-thirty-second executable increment — signed SIMD PCM subtraction
+
+The opt-in standard SIMD workload now implements the complete signed
+saturating add/subtract pair used for eight-lane 16-bit PCM arithmetic.
+`i16x8.sub_sat_s` is decoded at its standard `0xfd` subopcode, statically
+validated as a two-`v128`/one-`v128` operation and executed with portable
+little-endian lanes using Rust's defined `i16::saturating_sub`. The default
+crate still rejects SIMD explicitly, and unrelated SIMD operations remain
+load-time errors rather than decoder-only claims.
+
+Evidence on 2026-08-22: WABT emits and validates one 107-byte module exporting
+both operations. Tinyvm, macOS JavaScriptCore and a real headless browser agree
+on all eight add lanes and all eight subtract lanes, including positive and
+negative saturation. The manifest-bearing TinyArcade SIMD cartridge performs
+and checks both operations during `game_init`; the iOS Swift/C ABI smoke then
+runs, renders and snapshots it at 1,767,080 bytes arm64 and 1,852,192 bytes
+x86_64, still inside the existing opt-in budgets. The executable PRD trace now binds
+133 completed claims. Full WebAssembly SIMD remains deliberately open and
+workload-gated; this increment claims only the coherent signed PCM pair.

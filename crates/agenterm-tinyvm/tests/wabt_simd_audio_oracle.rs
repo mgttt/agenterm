@@ -7,6 +7,7 @@ use agenterm_tinyvm::{Val, ValueType, WasmError, WasmModule};
 const LEFT: [i16; 8] = [30_000, -30_000, 100, -100, 32_767, -32_768, 20_000, -20_000];
 const RIGHT: [i16; 8] = [10_000, -10_000, 200, -200, 1, -1, -25_000, 25_000];
 const EXPECTED: [i16; 8] = [32_767, -32_768, 300, -300, 32_767, -32_768, -5_000, 5_000];
+const EXPECTED_SUBTRACT: [i16; 8] = [20_000, -20_000, -100, 100, 32_766, -32_767, 32_767, -32_768];
 
 fn must<T>(result: Result<T, WasmError>, context: &str) -> T {
     result.unwrap_or_else(|error| panic!("{context}: {}", error.message()))
@@ -28,7 +29,7 @@ fn read_samples(memory: &[u8], offset: usize) -> [i16; 8] {
 
 #[test]
 #[ignore = "run through smoke-wabt-simd-audio.sh with an independently compiled fixture"]
-fn wabt_compiled_simd_audio_mix_matches_tinyvm() {
+fn wabt_compiled_simd_audio_add_sub_matches_tinyvm() {
     let path = PathBuf::from(
         std::env::var_os("TINYVM_WABT_SIMD_WASM")
             .expect("TINYVM_WABT_SIMD_WASM is set by the smoke script"),
@@ -52,24 +53,35 @@ fn wabt_compiled_simd_audio_mix_matches_tinyvm() {
         read_samples(&must(instance.memory(), "read SIMD memory"), 32),
         EXPECTED
     );
-
-    let tail_before = must(instance.memory(), "read tail before trap")[65_520..].to_vec();
-    let error = match instance.invoke_by_name("mix", &[Val::I32(0), Val::I32(16), Val::I32(65_528)])
-    {
-        Err(error) => error,
-        Ok(_) => panic!("out-of-bounds SIMD store must trap"),
-    };
-    assert!(error.message().starts_with("memory access ["));
-    assert_eq!(
-        &must(instance.memory(), "read tail after trap")[65_520..],
-        tail_before
+    must(
+        instance.invoke_by_name("subtract", &[Val::I32(0), Val::I32(16), Val::I32(32)]),
+        "subtract SIMD samples",
     );
+    assert_eq!(
+        read_samples(&must(instance.memory(), "read subtracted SIMD memory"), 32),
+        EXPECTED_SUBTRACT
+    );
+
+    for operation in ["mix", "subtract"] {
+        let tail_before = must(instance.memory(), "read tail before trap")[65_520..].to_vec();
+        let error = match instance
+            .invoke_by_name(operation, &[Val::I32(0), Val::I32(16), Val::I32(65_528)])
+        {
+            Err(error) => error,
+            Ok(_) => panic!("out-of-bounds SIMD {operation} store must trap"),
+        };
+        assert!(error.message().starts_with("memory access ["));
+        assert_eq!(
+            &must(instance.memory(), "read tail after trap")[65_520..],
+            tail_before
+        );
+    }
 }
 
 #[test]
 fn unsupported_simd_instruction_fails_during_decode() {
     let bytes = wat::parse_str(
-        "(module (func (param v128 v128) (result v128) local.get 0 local.get 1 i16x8.sub_sat_s))",
+        "(module (func (param v128 v128) (result v128) local.get 0 local.get 1 i16x8.mul))",
     )
     .expect("compile unsupported SIMD instruction");
     let error = match WasmModule::from_bytes(&bytes) {
