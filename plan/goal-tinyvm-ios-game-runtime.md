@@ -4344,3 +4344,27 @@ tests, the two-cartridge UI journey and an arm64 device Release build while
 rendering Depth Well through `forEachCell`. Physical-iPhone lifecycle and the
 processing/install state of the replacement TestFlight build remain external
 evidence, so the persistent goal stays active.
+
+## One-hundred-fortieth executable increment — strict untyped select domain
+
+The standard load gate now distinguishes the legacy inferred `select` from
+typed `select t`. Equal arms alone are insufficient: untyped `select` accepts
+numeric values (and `v128` only in the accepted SIMD profile), while
+`funcref` and `externref` require the typed instruction. Before this increment,
+tinyvm accepted a 41-byte untyped-reference module that WABT rejected, so the
+decoder, validator and executor agreed with each other but not with the
+standard.
+
+Evidence on 2026-08-22: the load-gate family contains rejected `funcref` and
+`externref` cases, an accepted and executed typed-`funcref` counterpart, and
+the existing accepted numeric case. WABT agrees with all 35 rejected and 12
+accepted modules. The 142-claim executable PRD map, complete all-feature test
+suite, warnings-denied Clippy, rustfmt, four-cartridge tinyvm/JSC/H5
+differential and the 101,256-byte stripped static-core gate pass. Default iOS
+consumers link at 1,797,688 bytes arm64 and 1,895,192 bytes x86_64. The real
+Nostalgia Arcade consumer rebuilds the exact archive (SHA-256
+`dbb2819a2be9e99fb3bfc583ddf17c58c1aae58b67b4a6783f8b0267825a7a38`),
+passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
+journey and an arm64 device Release build. Physical-iPhone lifecycle and
+TestFlight install/play evidence remain open, so the persistent goal stays
+active.

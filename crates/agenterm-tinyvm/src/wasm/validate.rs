@@ -113,6 +113,19 @@ fn type_error() -> WasmError {
     WasmError::Decode("validation: type mismatch")
 }
 
+/// The legacy, untyped `select` instruction is restricted to numeric values
+/// (plus vectors when that proposal is enabled). Reference values require the
+/// explicit result type carried by `select t`; accepting equal reference arms
+/// here would admit a module rejected by standard validators.
+fn is_untyped_select_type(value_type: u8) -> bool {
+    match value_type {
+        ANY | I32 | I64 | F32 | F64 => true,
+        #[cfg(feature = "simd")]
+        V128 => true,
+        _ => false,
+    }
+}
+
 impl<'a> V<'a> {
     fn frame_height(&self) -> usize {
         self.ctrl.last().map_or(0, |c| c.height)
@@ -705,7 +718,11 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             if a != ANY && b != ANY && a != b {
                 return Err(type_error());
             }
-            v.push(if a == ANY { b } else { a });
+            let selected_type = if a == ANY { b } else { a };
+            if !is_untyped_select_type(selected_type) {
+                return Err(type_error());
+            }
+            v.push(selected_type);
         }
         TypedSelect(ty) => {
             v.pop_expect(I32)?;

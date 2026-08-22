@@ -14,7 +14,7 @@ use agenterm_tinyvm::{WasmError, WasmModule, eval};
 use std::process::Command;
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
-const REJECTED: [(&str, &str); 33] = [
+const REJECTED: [(&str, &str); 35] = [
     (
         "empty_stack_add",
         "0061736d010000000105016000017f03020100070801046d61696e00000a050103006a0b",
@@ -46,6 +46,14 @@ const REJECTED: [(&str, &str); 33] = [
     (
         "select_arms_differ",
         "0061736d010000000105016000017f03020100070801046d61696e00000a0b0109004101420241011b0b",
+    ),
+    (
+        "untyped_select_funcref",
+        "0061736d010000000105016000017003020100070801046d61696e00000a0b010900d070d07041011b0b",
+    ),
+    (
+        "untyped_select_externref",
+        "0061736d010000000105016000016f03020100070801046d61696e00000a0b010900d06fd06f41001b0b",
     ),
     (
         "body_without_end",
@@ -147,7 +155,7 @@ const REJECTED: [(&str, &str); 33] = [
 ];
 
 /// Legal counterparts that must keep loading and running.
-const ACCEPTED: [(&str, &str); 11] = [
+const ACCEPTED: [(&str, &str); 12] = [
     (
         "add_two_consts",
         "0061736d010000000105016000017f03020100070801046d61696e00000a09010700410141026a0b",
@@ -163,6 +171,10 @@ const ACCEPTED: [(&str, &str); 11] = [
     (
         "select_arms_agree",
         "0061736d010000000105016000017f03020100070801046d61696e00000a0b0109004101410241011b0b",
+    ),
+    (
+        "typed_select_funcref",
+        "0061736d010000000105016000017003020100070801046d61696e00000a0d010b00d070d07041011c01700b",
     ),
     (
         "if_with_else_and_result",
@@ -277,6 +289,34 @@ fn legal_modules_still_load_and_run() {
             Err(e) => panic!("{name}: legal module failed to run: {}", e.message()),
         }
     }
+}
+
+#[test]
+fn standard_untyped_select_rejects_reference_values() {
+    for name in ["untyped_select_funcref", "untyped_select_externref"] {
+        let (_, hex) = REJECTED
+            .into_iter()
+            .find(|(case, _)| *case == name)
+            .expect("untyped reference select fixture");
+        assert!(
+            matches!(
+                WasmModule::from_bytes(&bytes(hex)),
+                Err(WasmError::Decode(_))
+            ),
+            "{name}: legacy select must reject reference operands"
+        );
+    }
+
+    let (_, typed_hex) = ACCEPTED
+        .into_iter()
+        .find(|(name, _)| *name == "typed_select_funcref")
+        .expect("typed reference select fixture");
+    let values = eval(&bytes(typed_hex))
+        .unwrap_or_else(|error| panic!("typed reference select: {}", error.message()));
+    assert!(
+        matches!(values.as_slice(), [agenterm_tinyvm::Val::FuncRef(None)]),
+        "typed reference select must return one null funcref"
+    );
 }
 
 #[test]

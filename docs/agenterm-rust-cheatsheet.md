@@ -2825,3 +2825,13 @@ contexts; a result arriving afterward then fails against a live, unbound
 channel instead of touching freed runtime state. Publish the generated
 completion imports through the same host-profile path used by runtime binding,
 or converter compatibility will drift from execution.
+
+## Untyped `select` does not admit reference values
+
+Equal operand types are not the complete validation rule for WebAssembly's
+legacy `select`. Its inferred value type must be numeric (or `v128` when SIMD
+is enabled); `funcref` and `externref` require the typed `select t` encoding.
+Keep both rejected reference kinds, one accepted typed-reference counterpart
+and the existing accepted numeric form in the independent load-gate oracle.
+Otherwise decoder, validator and executor can agree with each other while
+still accepting bytes that standard engines reject.
