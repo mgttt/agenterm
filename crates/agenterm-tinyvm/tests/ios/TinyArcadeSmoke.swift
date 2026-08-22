@@ -795,9 +795,19 @@ struct TinyArcadeSmoke {
             preconditionFailure("native smoke should decode indexed2d")
         }
         precondition(indexedFrame.width == 2 && indexedFrame.height == 1)
+        precondition(indexedFrame.paletteCount == 2)
         precondition(indexedFrame.paletteRGBA == [0xff00_00ff, 0x8000_ff00])
         precondition(indexedFrame.pixels == Data([0, 1]))
         media.render.withUnsafeBytes { renderBytes in
+            indexedFrame.withPaletteBytes { paletteBytes in
+                precondition(
+                    paletteBytes.baseAddress == renderBytes.baseAddress?.advanced(by: 16),
+                    "validated palettes must share the one Swift-owned render copy"
+                )
+                precondition(
+                    Data(paletteBytes) == Data([255, 0, 0, 255, 0, 255, 0, 128])
+                )
+            }
             indexedFrame.withPixelBytes { pixelBytes in
                 precondition(
                     pixelBytes.baseAddress == renderBytes.baseAddress?.advanced(by: 24),
@@ -914,6 +924,7 @@ struct TinyArcadeSmoke {
             preconditionFailure("classic smoke should decode indexed2d")
         }
         precondition(classicFrame.width == 320 && classicFrame.height == 200)
+        precondition(classicFrame.paletteCount == 256)
         precondition(classicFrame.paletteRGBA.count == 256)
         precondition(classicFrame.pixels.count == 64_000)
         let classicView = TinyArcadeIndexed2DView(

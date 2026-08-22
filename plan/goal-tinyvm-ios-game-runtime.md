@@ -4688,3 +4688,26 @@ passes 13 cartridge unit tests and the two-game UI journey (including the live
 Signal Lock indexed2d view), then produces an arm64 device Release build. The
 persistent goal therefore stays active only for the still-external evidence,
 not for lack of an integrated App consumer.
+
+## One-hundred-fifty-first executable increment — borrowed indexed2d palette
+
+`TinyArcadeIndexed2DFrame` no longer stores a decoded `[UInt32]` beside its
+immutable render bytes. It exposes allocation-free `paletteCount` and a scoped
+`withPaletteBytes` view over the validated canonical little-endian RGBA32
+plane; the source-compatible `paletteRGBA` property materializes only when a
+non-hot caller explicitly requests it. UIKit's RGBA expansion borrows palette
+and pixel planes together from the one Swift-owned frame copy, so ordinary
+Signal Lock/Paddle Guard frames allocate neither a second palette array nor a
+pixel-plane copy before filling the reusable presentation buffer.
+
+The booted iOS Simulator black box proves the borrowed palette shares the exact
+render owner, retains typed compatibility values, rejects out-of-palette pixels
+before exposure and drives changed translucent/opaque frames through the
+recyclable context. Its 320 × 200 loop averages 0.115 ms. Default consumers
+link at 1,798,872 bytes arm64 and 1,908,600 bytes x86_64, remaining inside the
+existing finite ceilings without another graduation. The opt-in SIMD pair also
+stays inside its existing gates at 1,817,624 / 1,921,184 bytes. The real
+Nostalgia Arcade consumer passes 13 cartridge unit tests, its two-game UI
+journey (including live Signal Lock display) and an arm64 device Release build
+with the exact current ABI v1.13 archive. Physical-device and TestFlight
+evidence remain open, so the persistent goal stays active.

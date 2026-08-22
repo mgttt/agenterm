@@ -300,7 +300,10 @@ The C boundary still performs one required copy into Swift-owned immutable
 read-only views into that owner for native decoding and RGBA conversion; their
 pointers cannot escape the closure. The zero-indexed `pixels` and
 `applicationMetadata` properties remain source-compatible value snapshots and
-copy only when a caller explicitly asks for them.
+copy only when a caller explicitly asks for them. The palette follows the same
+ownership rule: `paletteCount` is allocation-free, `withPaletteBytes` lends the
+validated canonical little-endian RGBA32 plane from the frame owner, and the
+source-compatible `paletteRGBA` array is materialized only on explicit access.
 Indexed presentation exposes the exact `rgba8888ByteCount` and can expand the
 validated palette plane directly into caller-owned storage through
 `writeRGBA8888(into:)`; a short destination fails explicitly before any byte is
@@ -310,7 +313,9 @@ final-size `Data` and never grows a separate `[UInt8]` first.
 `TinyArcadeIndexed2DView` retains one `NSMutableData` plus one bitmap context
 for the current dimensions. Same-sized frames overwrite that bounded storage
 and create only the presentation image; a dimension change replaces the buffer
-and context. The public byte contract remains straight, non-premultiplied RGBA.
+and context. Its expansion borrows palette and pixel planes together from the
+single immutable frame allocation; no decoded palette array exists on the hot
+path. The public byte contract remains straight, non-premultiplied RGBA.
 The UIKit-only path performs exact rounded alpha premultiplication while filling
 its context because Core Graphics bitmap contexts require a supported
 premultiplied-alpha layout. The 320 × 200 booted-Simulator loop proves one

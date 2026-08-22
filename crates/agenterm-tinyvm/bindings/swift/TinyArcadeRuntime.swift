@@ -381,7 +381,19 @@ public struct TinyArcadeGrid3DFrame: Sendable {
 public struct TinyArcadeIndexed2DFrame: Sendable {
     public let width: UInt16
     public let height: UInt16
-    public let paletteRGBA: [UInt32]
+    public let paletteCount: Int
+    /// Compatibility materialization. Frame renderers should use
+    /// `withPaletteBytes` to avoid allocating a second per-frame palette array.
+    public var paletteRGBA: [UInt32] {
+        var decoded: [UInt32] = []
+        decoded.reserveCapacity(paletteCount)
+        withPaletteBytes { palette in
+            for index in 0..<paletteCount {
+                decoded.append(Self.paletteColor(palette, index: index))
+            }
+        }
+        return decoded
+    }
     /// Compatibility copy with zero-based Data indices. Hot paths should use
     /// `withPixelBytes` to read the validated plane without another copy.
     public var pixels: Data { storage.subdata(in: pixelRange) }
@@ -396,6 +408,7 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
         return storage.subdata(in: applicationMetadataRange)
     }
     private let storage: Data
+    private let paletteRange: Range<Int>
     private let pixelRange: Range<Int>
     private let applicationMetadataRange: Range<Int>?
 
@@ -414,28 +427,24 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
         }
         width = TinyArcadeGrid3DFrame.u16(data, 8)
         height = TinyArcadeGrid3DFrame.u16(data, 10)
-        let paletteCount = Int(TinyArcadeGrid3DFrame.u16(data, 12))
+        let decodedPaletteCount = Int(TinyArcadeGrid3DFrame.u16(data, 12))
         let flags = TinyArcadeGrid3DFrame.u16(data, 14)
         let pixelCount = Int(width) * Int(height)
-        let pixelOffset = 16 + paletteCount * 4
+        let pixelOffset = 16 + decodedPaletteCount * 4
         let pixelEnd = pixelOffset + pixelCount
         guard width > 0, height > 0,
               width <= 512, height <= 512,
               pixelCount <= Int(UInt16.max),
-              (1...256).contains(paletteCount),
+              (1...256).contains(decodedPaletteCount),
               flags & ~UInt16(1) == 0,
               pixelEnd <= data.count else {
             throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d frame size")
         }
-        var decodedPalette: [UInt32] = []
-        decodedPalette.reserveCapacity(paletteCount)
-        for index in 0..<paletteCount {
-            decodedPalette.append(TinyArcadeGrid3DFrame.u32(data, 16 + index * 4))
-        }
-        paletteRGBA = decodedPalette
+        paletteCount = decodedPaletteCount
         storage = data
+        paletteRange = 16..<pixelOffset
         pixelRange = pixelOffset..<pixelEnd
-        guard !data[pixelRange].contains(where: { Int($0) >= paletteCount }) else {
+        guard !data[pixelRange].contains(where: { Int($0) >= decodedPaletteCount }) else {
             throw TinyArcadeGrid3DFrame.decodeError("invalid indexed2d pixel")
         }
         if flags & 1 == 0 {
@@ -476,6 +485,16 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
         }
     }
 
+    /// Borrows canonical little-endian RGBA32 palette bytes from the same
+    /// immutable frame owner. The pointer must not escape `body`.
+    public func withPaletteBytes<Result>(
+        _ body: (UnsafeRawBufferPointer) throws -> Result
+    ) rethrows -> Result {
+        try storage.withUnsafeBytes { bytes in
+            try body(UnsafeRawBufferPointer(rebasing: bytes[paletteRange]))
+        }
+    }
+
     /// Borrows optional game-owned metadata synchronously without copying it.
     /// The generic runtime does not interpret the bytes or let the pointer escape.
     public func withApplicationMetadataBytes<Result>(
@@ -493,10 +512,10 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
     /// Expands the indexed plane into canonical row-major RGBA8 bytes with one
     /// fully initialized allocation. The decoded frame bounds it below 256 KiB.
     public func rgba8888() -> Data {
-        withPixelBytes { pixels in
+        withPlanes { palette, pixels in
             var rgba = Data(count: pixels.count * 4)
             rgba.withUnsafeMutableBytes { output in
-                expandRGBA8888(pixels: pixels, into: output)
+                expandRGBA8888(palette: palette, pixels: pixels, into: output)
             }
             return rgba
         }
@@ -520,9 +539,9 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
         guard output.count >= rgba8888ByteCount else {
             throw TinyArcadePresentationError.bufferTooSmall(required: rgba8888ByteCount)
         }
-        withPixelBytes { pixels in
+        withPlanes { palette, pixels in
             for (pixelOffset, index) in pixels.enumerated() {
-                let color = paletteRGBA[Int(index)]
+                let color = Self.paletteColor(palette, index: Int(index))
                 let alpha = UInt16(UInt8(truncatingIfNeeded: color >> 24))
                 let outputOffset = pixelOffset * 4
                 output[outputOffset] = Self.premultiply(
@@ -540,17 +559,18 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
     }
 
     private func expandRGBA8888(into output: UnsafeMutableRawBufferPointer) {
-        withPixelBytes { pixels in
-            expandRGBA8888(pixels: pixels, into: output)
+        withPlanes { palette, pixels in
+            expandRGBA8888(palette: palette, pixels: pixels, into: output)
         }
     }
 
     private func expandRGBA8888(
+        palette: UnsafeRawBufferPointer,
         pixels: UnsafeRawBufferPointer,
         into output: UnsafeMutableRawBufferPointer
     ) {
         for (pixelOffset, index) in pixels.enumerated() {
-            let color = paletteRGBA[Int(index)]
+            let color = Self.paletteColor(palette, index: Int(index))
             let outputOffset = pixelOffset * 4
             output[outputOffset] = UInt8(truncatingIfNeeded: color)
             output[outputOffset + 1] = UInt8(truncatingIfNeeded: color >> 8)
@@ -561,6 +581,28 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
 
     private static func premultiply(_ component: UInt8, alpha: UInt16) -> UInt8 {
         UInt8((UInt16(component) * alpha + 127) / 255)
+    }
+
+    private func withPlanes<Result>(
+        _ body: (UnsafeRawBufferPointer, UnsafeRawBufferPointer) throws -> Result
+    ) rethrows -> Result {
+        try storage.withUnsafeBytes { bytes in
+            try body(
+                UnsafeRawBufferPointer(rebasing: bytes[paletteRange]),
+                UnsafeRawBufferPointer(rebasing: bytes[pixelRange])
+            )
+        }
+    }
+
+    private static func paletteColor(
+        _ palette: UnsafeRawBufferPointer,
+        index: Int
+    ) -> UInt32 {
+        let offset = index * 4
+        return UInt32(palette[offset])
+            | UInt32(palette[offset + 1]) << 8
+            | UInt32(palette[offset + 2]) << 16
+            | UInt32(palette[offset + 3]) << 24
     }
 
     /// Builds an sRGB, non-premultiplied RGBA image suitable for Core Graphics
