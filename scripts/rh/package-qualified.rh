@@ -4,6 +4,13 @@
 
 import "scripts/rh/lib/package_qualified" as package_qualified;
 
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 fn entry() {
     if args.len != 3 {
         return rh::fail("expected: REPO RECEIPT_PATH OUTPUT_DIRECTORY");

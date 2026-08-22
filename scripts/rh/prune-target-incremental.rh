@@ -6,6 +6,13 @@
 
 import "scripts/rh/lib/prune_target_incremental" as prune;
 
+fn require(condition, message) {
+    if !condition {
+        throw message;
+    }
+    0
+}
+
 fn entry() {
     let valid_args = 0;
     if args.len == 1 {
