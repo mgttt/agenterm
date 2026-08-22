@@ -80,7 +80,8 @@ tinyvm iOS game runtime
 │   │   └── header-only core v1 declarations [x]
 │   │       └── indexed2d metadata extension [x]
 │   ├── app-build host profile        [x]
-│   │   └── exact zero-budget channel semantics [x]
+│   │   ├── exact zero-budget channel semantics [x]
+│   │   └── profile-bound descriptor return [x]
 │   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
 ├── iOS native bridge                 [~]
@@ -4238,3 +4239,28 @@ map pass. The real App consumes the exact archive and passes eight Depth Well
 tests, five Signal Lock tests, one UI journey and an unsigned arm64 device
 Release build. Physical-device and TestFlight evidence remain open, so the
 persistent goal stays active.
+
+## One-hundred-thirty-sixth executable increment — profile-bound descriptor return
+
+C ABI v1.11 now combines exact TAH1 compatibility checking with canonical TAD1
+descriptor return. Each two-stage call decodes the cartridge under the
+published profile's actual VM limits and native import table, then encodes the
+descriptor from that accepted result. Swift's `inspectCompatibleCartridge`
+consumes those bytes directly instead of performing a second independent
+descriptor parse under default limits. The older check-only and
+descriptor-only exports remain source and binary compatible.
+
+Evidence on 2026-08-22: the C black box returns a bounded TAD1 descriptor for a
+matching native cartridge, rejects a mismatched signature before touching the
+output length and proves neither path calls app code. The linked Swift smoke
+returns the same descriptor as its earlier public behavior through the new
+symbol. Default iOS consumers link at 1,769,384 bytes arm64 and 1,863,136 bytes
+x86_64. Opt-in SIMD links at 1,770,168 / 1,867,160 bytes; only its crossed
+arm64 bucket receives one explicit 16 KiB graduation step. The complete
+all-feature suite, JSC/H5 differential, warnings-denied Clippy, rustfmt,
+ShellCheck and the 137-leaf executable PRD map pass. The real App consumes the
+exact ABI v1.11 archive with SHA-256
+`58e04e8cd26151aee63addd5a7359858ccf0c3f9d5ad0c15efcc150d1a267e2d`,
+passes eight Depth Well tests, five Signal Lock tests, one UI journey and an
+unsigned arm64 device Release build. Physical-device and TestFlight evidence
+remain open, so the persistent goal stays active.

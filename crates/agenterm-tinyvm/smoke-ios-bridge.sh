@@ -254,12 +254,15 @@ COMPLETION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeCompletionSmoke-arm64")
 # Preparing the complete snapshot beside its destination, applying protection
 # before publication and then replacing the old generation atomically funds one
 # further step. This is the persistence transaction itself, not test scaffolding.
+# ABI v1.11's profile-bound TAD1 return stays inside the default product gate.
 MAX_ARM64_LINKED_BYTES=1769472
 # The optional SIMD profile keeps v128 inline and adds its portable interpreter
 # path only when explicitly requested. Give that opt-in product two separate
-# 16 KiB graduation steps; never weaken the default iOS product ceiling.
+# 16 KiB graduation steps. Its ABI v1.11 combined compatibility return crosses
+# the prior bucket and receives one further explicit step; never weaken the
+# default iOS product ceiling.
 case ",$RUST_FEATURES," in
-  *,simd,*) MAX_ARM64_LINKED_BYTES=1769472 ;;
+  *,simd,*) MAX_ARM64_LINKED_BYTES=1785856 ;;
 esac
 # x86_64 is a simulator-only compatibility slice. Keep its separate ceiling
 # honest instead of weakening the arm64 product-consumer gate.

@@ -118,7 +118,7 @@ public struct TinyArcadeCartridgeDescriptorV1: Sendable, Equatable {
         return try decode(encoded, cartridgeLength: cartridge.count)
     }
 
-    private static func decode(_ data: Data, cartridgeLength: Int) throws -> Self {
+    fileprivate static func decode(_ data: Data, cartridgeLength: Int) throws -> Self {
         guard data.count >= 32,
               data.prefix(4) == Data("TAD1".utf8),
               u16(data, 4) == 1,
@@ -1943,18 +1943,55 @@ public struct TinyArcadeHostProfileV1: Sendable, Equatable {
     public func inspectCompatibleCartridge(
         _ cartridge: Data
     ) throws -> TinyArcadeCartridgeDescriptorV1 {
-        let status = cartridge.withUnsafeBytes { wasm in
+        var required = 0
+        let query = cartridge.withUnsafeBytes { wasm in
             encoded.withUnsafeBytes { profile in
-                tinyarcade_v1_check_cartridge_host_profile(
+                tinyarcade_v1_copy_compatible_cartridge_descriptor(
                     wasm.bindMemory(to: UInt8.self).baseAddress,
                     wasm.count,
                     profile.bindMemory(to: UInt8.self).baseAddress,
-                    profile.count
+                    profile.count,
+                    nil,
+                    0,
+                    &required
                 )
             }
         }
+        guard query == TINYARCADE_BUFFER_TOO_SMALL,
+              (32...(64 * 1_024)).contains(required) else {
+            try TinyArcadeRuntimeV1.check(query)
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                message: "invalid compatible cartridge descriptor length"
+            )
+        }
+        var descriptor = Data(count: required)
+        let status = cartridge.withUnsafeBytes { wasm in
+            encoded.withUnsafeBytes { profile in
+                descriptor.withUnsafeMutableBytes { output in
+                    tinyarcade_v1_copy_compatible_cartridge_descriptor(
+                        wasm.bindMemory(to: UInt8.self).baseAddress,
+                        wasm.count,
+                        profile.bindMemory(to: UInt8.self).baseAddress,
+                        profile.count,
+                        output.bindMemory(to: UInt8.self).baseAddress,
+                        output.count,
+                        &required
+                    )
+                }
+            }
+        }
         try TinyArcadeRuntimeV1.check(status)
-        return try TinyArcadeCartridgeDescriptorV1.inspect(cartridge)
+        guard required == descriptor.count else {
+            throw TinyArcadeRuntimeError(
+                status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                message: "compatible cartridge descriptor length changed"
+            )
+        }
+        return try TinyArcadeCartridgeDescriptorV1.decode(
+            descriptor,
+            cartridgeLength: cartridge.count
+        )
     }
 }
 

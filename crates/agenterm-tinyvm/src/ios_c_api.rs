@@ -761,7 +761,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 10
+    (1 << 16) | 11
 }
 
 fn append_u16(output: &mut Vec<u8>, value: usize) -> Result<(), FfiError> {
@@ -919,6 +919,29 @@ pub unsafe extern "C" fn tinyarcade_v1_check_cartridge_host_profile(
             .and_then(|profile| profile.inspect_cartridge(wasm))
             .map_err(wasm_error)?;
         Ok(())
+    })
+}
+
+/// Statically check a cartridge against one exact TAH1 profile and return the
+/// canonical TAD1 descriptor produced by that same bounded inspection pass.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_copy_compatible_cartridge_descriptor(
+    wasm: *const u8,
+    wasm_len: usize,
+    profile: *const u8,
+    profile_len: usize,
+    output: *mut u8,
+    capacity: usize,
+    output_len: *mut usize,
+) -> i32 {
+    boundary(|| {
+        let wasm = unsafe { input_bytes(wasm, wasm_len, "invalid cartridge input")? };
+        let profile = unsafe { input_bytes(profile, profile_len, "invalid host profile input")? };
+        let descriptor = HostProfileV1::decode(profile)
+            .and_then(|profile| profile.inspect_cartridge(wasm))
+            .map_err(wasm_error)?;
+        let encoded = encode_descriptor(&descriptor, wasm.len())?;
+        unsafe { copy_bytes(&encoded, output, capacity, output_len) }
     })
 }
 
@@ -2476,7 +2499,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 10);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 11);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -2755,6 +2778,41 @@ mod tests {
             },
             STATUS_OK
         );
+        let mut compatible_len = 0usize;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_compatible_cartridge_descriptor(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    profile.as_ptr(),
+                    profile.len(),
+                    ptr::null_mut(),
+                    0,
+                    &mut compatible_len,
+                )
+            },
+            STATUS_BUFFER_TOO_SMALL
+        );
+        let mut compatible = vec![0; compatible_len];
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_compatible_cartridge_descriptor(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    profile.as_ptr(),
+                    profile.len(),
+                    compatible.as_mut_ptr(),
+                    compatible.len(),
+                    &mut compatible_len,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(&compatible[..4], b"TAD1");
+        assert_eq!(
+            u32::from_le_bytes(compatible[24..28].try_into().expect("descriptor length")),
+            wasm.len() as u32
+        );
         assert_eq!(
             probe.calls.get(),
             0,
@@ -2802,6 +2860,22 @@ mod tests {
             },
             STATUS_TRAP
         );
+        compatible_len = usize::MAX;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_compatible_cartridge_descriptor(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    wrong_profile.as_ptr(),
+                    wrong_profile.len(),
+                    ptr::null_mut(),
+                    0,
+                    &mut compatible_len,
+                )
+            },
+            STATUS_TRAP
+        );
+        assert_eq!(compatible_len, usize::MAX);
         assert_eq!(probe.calls.get(), 0);
     }
 
@@ -3528,6 +3602,7 @@ mod tests {
             "tinyarcade_v1_copy_host_profile",
             "tinyarcade_v1_copy_host_profile_with_completions",
             "tinyarcade_v1_check_cartridge_host_profile",
+            "tinyarcade_v1_copy_compatible_cartridge_descriptor",
             "tinyarcade_v1_completion_create",
             "tinyarcade_v1_completion_close",
             "tinyarcade_v1_completion_begin",

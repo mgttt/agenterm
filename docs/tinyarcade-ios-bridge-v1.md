@@ -171,6 +171,13 @@ Render, audio and state byte ceilings preserve zero exactly as a disabled or
 empty-only channel; zero never expands to a default. Thus the profile generated
 by Swift is the same configuration the C runtime enforces dynamically.
 
+ABI v1.11 adds
+`tinyarcade_v1_copy_compatible_cartridge_descriptor`. A successful TAH1
+preflight now returns canonical TAD1 bytes from the profile-bound inspection
+instead of making Swift parse the cartridge again under default limits. The
+ordinary check-only and descriptor-only calls remain available for existing C
+consumers; the combined call changes neither artifact format nor runtime state.
+
 `TinyArcadePrivateLibraryV1` turns that private opening into a complete local
 library transaction. It preflights exact bytes under core-only policy before
 an atomic canonical install, caps each object at the runtime's 2 MiB ceiling
@@ -388,6 +395,9 @@ main-actor closures bridged through the runtime's proven owner-thread callback.
 The companion host-profile function includes the same generated completion
 imports used by runtime binding.
 
+ABI v1.11 only appends the combined static compatibility/descriptor export.
+It changes no struct layout, callback ownership rule or cartridge ABI.
+
 ## Current evidence boundary
 
 The smoke gate builds a real arm64 iOS-device archive and a universal
@@ -472,14 +482,15 @@ steps, 17 pages, depth 6 and 62 activation slots on the iPhone 17 Pro simulator;
 these remain simulator figures until the physical command is run.
 
 `smoke-nostalgia-consumer.sh` is the runtime-owned closure of that integration
-boundary. It rebuilds the package from this checkout, executes 11 App-target
+boundary. It rebuilds the package from this checkout, executes 13 App-target
 unit tests plus the two-game UI journey, and builds the generic arm64 iOS
 product. It then requires the consumer's archive to be byte-identical to the
 one emitted under this repository's `target/`, checks that the final executable
-contains the ABI v1.10 completion-channel symbol, and rejects any implicit
+contains the ABI v1.10 completion-channel symbol while consuming the current
+v1.11 archive, and rejects any implicit
 rewrite of the committed cartridges or Xcode project. Evidence on 2026-08-22
 has archive SHA-256
-`44b6cc20abc0c655d8a7d7ddfecc7313fbccfa709bbea8bf432da82298ffdad8`;
+`58e04e8cd26151aee63addd5a7359858ccf0c3f9d5ad0c15efcc150d1a267e2d`;
 the App contains only the 6,116-byte Depth Well and 6,040-byte Signal Lock
 cartridges, with no WebKit/JavaScriptCore, URLSession, external-library surface
 or archived native game engine. A counted App-target test now takes a tone from

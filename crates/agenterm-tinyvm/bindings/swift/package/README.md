@@ -22,8 +22,10 @@ library uses this same descriptor to return
 Call `TinyArcadeHostProfileV1.appBuild` with the same config and native
 functions as the app runtime to export canonical TAH1 bytes for converters.
 `inspectCompatibleCartridge` checks an exact standard import/resource profile
-without instantiating the guest or calling handlers. Dynamic fuel/output and
-native semantics remain separate reviewed-game gates.
+without instantiating the guest or calling handlers, and returns the canonical
+TAD1 description produced under that same profile rather than reparsing under
+defaults. Dynamic fuel/output and native semantics remain separate
+reviewed-game gates.
 The render, audio and state ceilings preserve zero exactly as a disabled or
 empty-only channel; TAH1 never rewrites zero to a default or to unlimited.
 
