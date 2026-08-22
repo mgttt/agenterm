@@ -30,12 +30,15 @@ private struct TinyArcadeSnapshotStoreSmoke {
         )
         let gameID = "com.partnernet.paddle-guard"
         let file = directory.appendingPathComponent("\(gameID).snapshot-v1")
+        let prepared = directory.appendingPathComponent(".\(gameID).snapshot-v1.prepared")
 
         let fresh = try store.openSession(makeRuntime: makeRuntime)
         precondition(fresh.disposition == .fresh)
         precondition(fresh.gameClockMilliseconds == 0)
         _ = try fresh.runtime.tickMedia(buttons: 1 << 4, clockMilliseconds: 0)
+        try Data("interrupted-old-save".utf8).write(to: prepared)
         try store.save(runtime: fresh.runtime, gameClockMilliseconds: 123)
+        precondition(!FileManager.default.fileExists(atPath: prepared.path))
         _ = try fresh.runtime.tickMedia(buttons: 1 << 0, clockMilliseconds: 16)
         try store.save(runtime: fresh.runtime, gameClockMilliseconds: 456)
         let stableSnapshot = try Data(contentsOf: file)
@@ -49,9 +52,23 @@ private struct TinyArcadeSnapshotStoreSmoke {
             includingPropertiesForKeys: nil
         )
         precondition(initialDirectoryItems == [file])
+        try FileManager.default.createDirectory(at: prepared, withIntermediateDirectories: false)
+        let preparedSentinel = prepared.appendingPathComponent("must-not-be-recursively-removed")
+        try Data("owned-by-another-writer".utf8).write(to: preparedSentinel)
+        do {
+            try store.save(runtime: fresh.runtime, gameClockMilliseconds: 700)
+            preconditionFailure("prepared directory must fail closed")
+        } catch let error as TinyArcadeSnapshotStoreError {
+            precondition(error == .storageFailure)
+        }
+        precondition(FileManager.default.fileExists(atPath: preparedSentinel.path))
+        let afterPreparedDirectoryFailure = try Data(contentsOf: file)
+        precondition(afterPreparedDirectoryFailure == stableSnapshot)
+        try FileManager.default.removeItem(at: prepared)
         try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: file.path)
         let immutableAttributes = try FileManager.default.attributesOfItem(atPath: file.path)
         precondition(immutableAttributes[.immutable] as? Bool == true)
+        try FileManager.default.createSymbolicLink(at: prepared, withDestinationURL: file)
         do {
             try store.save(runtime: fresh.runtime, gameClockMilliseconds: 789)
             preconditionFailure("immutable published snapshot must reject replacement")
@@ -126,7 +143,10 @@ private struct TinyArcadeSnapshotStoreSmoke {
             precondition(error == .unsafeStoredFile)
         }
         try FileManager.default.removeItem(at: file)
-        print("OK: atomic snapshot overwrite → restore → corrupt/oversize recovery → symlink refusal")
+        print(
+            "OK: bounded prepared-slot recovery → atomic overwrite → restore "
+                + "→ corrupt/oversize recovery → symlink refusal"
+        )
     }
 
     static func checksum(_ data: Data) -> UInt32 {

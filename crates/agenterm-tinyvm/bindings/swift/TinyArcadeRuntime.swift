@@ -2943,7 +2943,7 @@ public final class TinyArcadeSnapshotStoreV1 {
         guard !snapshot.isEmpty, snapshot.count <= maximumSnapshotBytes else {
             throw TinyArcadeSnapshotStoreError.invalidLimit
         }
-        let gameIDBytes = Array(gameID.utf8)
+        let gameIDBytes = gameID.utf8
         let envelopeLength = 32 + gameIDBytes.count + snapshot.count
         let url = try fileURL(gameID: gameID)
         try rejectUnsafeExistingFile(url)
@@ -2964,11 +2964,12 @@ public final class TinyArcadeSnapshotStoreV1 {
         let checksum = Self.checksum(data)
         for offset in 0..<4 { data[20 + offset] = UInt8(truncatingIfNeeded: checksum >> (offset * 8)) }
         let temporaryURL = directoryURL.appendingPathComponent(
-            ".\(gameID).snapshot-v1.\(UUID().uuidString).prepared",
+            ".\(gameID).snapshot-v1.prepared",
             isDirectory: false
         )
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
         do {
+            try removePreparedFileIfPresent(temporaryURL)
             try data.write(to: temporaryURL, options: .withoutOverwriting)
             try FileManager.default.setAttributes(
                 [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
@@ -3037,7 +3038,7 @@ public final class TinyArcadeSnapshotStoreV1 {
                   storedID == gameID else { return .invalid }
             return .valid(
                 clock: clock,
-                snapshot: data.subdata(in: (32 + idLength)..<data.count)
+                snapshot: data[(32 + idLength)..<data.count]
             )
         } catch let error as TinyArcadeSnapshotStoreError {
             throw error
@@ -3063,6 +3064,35 @@ public final class TinyArcadeSnapshotStoreV1 {
             }
         } catch let error as TinyArcadeSnapshotStoreError {
             throw error
+        } catch {
+            throw TinyArcadeSnapshotStoreError.storageFailure
+        }
+    }
+
+    /// Reclaim the one private publication slot left by a process kill. A
+    /// dangling symlink is removed as a directory entry, never followed; an
+    /// unexpected directory or special file fails closed instead of being
+    /// recursively deleted.
+    private func removePreparedFileIfPresent(_ url: URL) throws {
+        let isSymbolicLink =
+            (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) != nil
+        guard isSymbolicLink || FileManager.default.fileExists(atPath: url.path) else { return }
+        if !isSymbolicLink {
+            do {
+                let values = try url.resourceValues(
+                    forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+                )
+                guard values.isRegularFile == true, values.isSymbolicLink != true else {
+                    throw TinyArcadeSnapshotStoreError.storageFailure
+                }
+            } catch let error as TinyArcadeSnapshotStoreError {
+                throw error
+            } catch {
+                throw TinyArcadeSnapshotStoreError.storageFailure
+            }
+        }
+        do {
+            try FileManager.default.removeItem(at: url)
         } catch {
             throw TinyArcadeSnapshotStoreError.storageFailure
         }

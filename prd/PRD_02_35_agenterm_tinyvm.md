@@ -146,6 +146,7 @@ agenterm-tinyvm (35)                                      [~]
 │   ├── scene lifecycle + persistence                    [~]
 │   │   ├── real App shared session + frame pacer          [x]
 │   │   └── protected prepublication snapshot replace     [x]
+│   │       └── bounded prepared slot + borrowed restore slice [x]
 │   └── physical-device lifecycle/audio/play             [ ]
 │
 ├── evidence                                             [~]

@@ -106,6 +106,7 @@ tinyvm iOS game runtime
 │   ├── private atomic library         [x]
 │   ├── atomic scene persistence      [x]
 │   │   └── protected prepublication replace [x]
+│   │       └── bounded prepared slot + borrowed restore slice [x]
 │   ├── replay record/verify owner     [x]
 │   └── on-device lifecycle test      [ ]
 ├── real-game proof                   [~]
@@ -4184,3 +4185,30 @@ PRD map pass; the map now binds 134 completed claims. The real App consumes the
 exact archive and passes eight Depth Well tests, five Signal Lock tests, one UI
 journey and an unsigned arm64 device Release build. Physical-device lifecycle
 and TestFlight evidence remain open, so the persistent goal stays active.
+
+## One-hundred-thirty-fourth executable increment — bounded crash recovery slot
+
+Snapshot publication now uses one deterministic private prepared slot per game
+instead of generating an unbounded sequence of UUID filenames. Before each
+save, the MainActor store reclaims an interrupted regular-file generation or a
+dangling/safe symlink entry without following it; an unexpected directory or
+special file fails closed rather than being recursively deleted. This bounds
+disk artifacts across process kills while retaining prepare/protect/publish
+ordering. The envelope appends the bounded UTF-8 view without an intermediate
+array, and restore passes the mapped `Data` slice directly to synchronous
+runtime resume instead of making a full-size `subdata` copy.
+
+Evidence on 2026-08-22: the linked Swift black box seeds the deterministic slot
+with interrupted-save bytes and proves the next save reclaims it. It then puts
+a symlink from that slot to the immutable published generation, proves only the
+link is removed, forces replacement failure, and checks the published bytes and
+456 ms restore remain exact with no prepared artifact. Default iOS consumers
+link at 1,767,608 bytes arm64 and 1,853,664 bytes x86_64; opt-in SIMD links at
+1,768,552 / 1,857,688 bytes. The arm64 product stays within its existing
+ceiling; the simulator-only file-kind checks receive one explicit 16 KiB step.
+Both iOS configurations, the complete all-feature suite, warnings-denied
+Clippy, rustfmt, ShellCheck and the executable PRD map pass; the map now binds
+135 completed claims. The real App consumes the exact archive and passes eight
+Depth Well tests, five Signal Lock tests, one UI journey and an unsigned arm64
+device Release build. Physical-device and TestFlight evidence remain open, so
+the persistent goal stays active.

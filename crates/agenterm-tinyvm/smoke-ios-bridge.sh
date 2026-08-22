@@ -45,12 +45,31 @@ if grep -Fq 'Set<GCKeyCode>' "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; th
 fi
 grep -Fq 'data.reserveCapacity(envelopeLength)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
-grep -Fq '.prepared"' "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq '.snapshot-v1.prepared"' "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'try removePreparedFileIfPresent(temporaryURL)' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'snapshot: data[(32 + idLength)..<data.count]' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 grep -Fq 'options: .usingNewMetadataOnly' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 if grep -Fq 'data.write(to: url, options: .atomic)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
   echo "snapshot protection must be applied before atomic publication" >&2
+  exit 1
+fi
+if grep -Fq 'Array(gameID.utf8)' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
+  echo "snapshot envelope must append the bounded UTF-8 view without staging an Array" >&2
+  exit 1
+fi
+if grep -Fq '.snapshot-v1.\(UUID().uuidString).prepared' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
+  echo "snapshot preparation must use one reclaimable per-game slot" >&2
+  exit 1
+fi
+if grep -Fq 'snapshot: data.subdata(' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
+  echo "snapshot restore must borrow the bounded Data slice without a full copy" >&2
   exit 1
 fi
 
@@ -253,8 +272,10 @@ esac
 # protocol receives the same one-bucket step as the arm64 product. The bounded
 # tone-wave cache receives one matching simulator-only step. The Apple input
 # adapter receives three matching steps; its synthetic two-controller proof is
-# compiled only into this smoke executable and receives one further step.
-MAX_X86_64_LINKED_BYTES=1851392
+# compiled only into this smoke executable and receives one further step. The
+# crash-recoverable prepared slot adds regular-file/symlink discrimination and
+# receives one simulator-only step; the arm64 product stays under its ceiling.
+MAX_X86_64_LINKED_BYTES=1867776
 case ",$RUST_FEATURES," in
   *,simd,*) MAX_X86_64_LINKED_BYTES=1867776 ;;
 esac

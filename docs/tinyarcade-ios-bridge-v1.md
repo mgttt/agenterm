@@ -62,8 +62,11 @@ opening the exact cached bytes.
 `TinyArcadeSnapshotStoreV1` owns scene/background persistence independently of
 cartridge distribution. It stores one bounded binary envelope per canonical
 game id with the host-owned game clock, CRC-32 and the runtime's already
-ABI/state-schema-bound snapshot. A save reserves one exact envelope buffer,
-writes it to a same-directory prepared file, applies
+ABI/state-schema-bound snapshot. A save reserves one exact envelope buffer and
+writes it to one same-directory, per-game prepared slot. A stale regular file
+or symlink in that private slot is reclaimed before reuse; unexpected special
+files and directories fail closed, so interrupted saves cannot accumulate
+unbounded UUID artifacts or trigger recursive cleanup. The store applies
 complete-until-first-authentication protection there, and only then atomically
 moves or replaces the published generation. Failure before publication removes
 the prepared file and leaves the previous snapshot byte-for-byte intact. The
@@ -71,7 +74,8 @@ directory is excluded from backup. Reads reject symlinks and
 oversized/non-regular files. A corrupt or
 incompatible snapshot is removed; the failed candidate runtime is closed and a
 second clean runtime is returned with `discardedInvalid`, so save damage cannot
-turn into a cartridge launch failure.
+turn into a cartridge launch failure. A valid mapped envelope passes its bounded
+snapshot slice directly to synchronous resume without a full `subdata` copy.
 
 `TinyArcadeGameSessionV1` is the matching foreground owner. It aggregates exact
 pressed sets for at most 32 stable input-source ids, so one touch/controller
