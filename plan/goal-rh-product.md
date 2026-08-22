@@ -17,13 +17,22 @@ SSOT：`plan/design-rh-standalone-product.md`。不达目标不停。不要把�
 5. 私仓按公仓口吻：无本机路径、无外仓票号、无另一个产品的内部名。
 6. `cargo test -p rh-lang` 默认绿；`--features native` 绿；`cargo tree -p rh-lang -e normal` 无 libloading/tempfile/agenterm。默认 `eval` 含 `dlcall`/`enter` 必须失败。
 
-## 现在做
+## 现在做（三条赛道并行，互不等信封）
 
-拿真实脚本撞解释器。先测试再改。缺的是 host **名**就加名字，不是加语法。
+缺的是 host **名**就加名字，不是加语法。冻结面才报；不要每修一洞就停。
 
-- 只依赖 `std` / `rh::json` / `command_status` 的 AgenTerm 脚本，在独立 `rh` 上跑通。AOT 时代的 `bool == 0` 在 Language 1 里不是假：改脚本，不要强制转换。
-- 语料继续钉还没覆盖的用户路径（见 `plan/rh-tdd-review.md`）。禁止为绿改期望。
-- README 的 rh / console / rust 块继续当测试跑。
+**A — 脚本在独立 rh 上跑（opus0）**  
+用 AgenTerm 已有的 `bundle_project_source` 把靠 `import` 的 std-only 脚本摊成单文件，再用独立 `rh` 跑。语言不加 `import`，bundler 不搬进 rh 仓。Fleet/GUI/float 的跳过并点名。
+
+**B — 两边解释器同一道诚实闸（本机可做）**  
+独立 rh 上 Bool 对非 Bool 的 `==`/`!=` 已停。把同一闸抄进 `agenterm-rh` interp，修分叉，不是 git-pin 私仓。AOT/pack 先不动。
+
+**C — 语料（grok）**  
+钉还没覆盖的用户路径（`plan/rh-tdd-review.md`）。禁止为绿改期望。这是覆盖，不当产品进度。
+
+已站住、不再当「现在做」：10 个无 import 的 std-only 脚本已在独立 rh 上核过；`has` 是 Bool；`kill_tree` / `is_reparse_point` 拒绝。
+
+硬件墙（不并行假做）：Windows 两格、lnx-aarch64 真跑。没有真机器就停在类型检查/交叉包。
 
 ## 不要做
 

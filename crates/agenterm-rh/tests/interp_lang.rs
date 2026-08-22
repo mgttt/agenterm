@@ -336,3 +336,25 @@ fn fixture_failure_arms_report_their_reason() {
         "{error}"
     );
 }
+
+/// Bool against a non-bool has no honest answer: `condition == 0` never
+/// fires, and `contains(x) != 0` is true for every input.
+#[test]
+fn comparing_a_bool_to_an_int_stops() {
+    let error = eval_err("fn entry() { let ready = (1 == 1); if ready == 0 { 1 } else { 0 } }");
+    let text = error.to_string();
+    assert!(text.contains("cannot compare bool with int"), "{text}");
+    assert!(
+        eval_err("fn entry() { let missing = (1 == 2); if missing != 1 { 1 } else { 0 } }")
+            .to_string()
+            .contains("cannot compare bool with int")
+    );
+    assert_eq!(
+        eval("fn entry() { let a = (1 == 1); let b = (2 == 2); if a == b { 0 } else { 1 } }"),
+        Value::Int(0)
+    );
+    assert_eq!(
+        eval(r#"fn entry() { if "a" == 1 { 1 } else { 0 } }"#),
+        Value::Int(0)
+    );
+}

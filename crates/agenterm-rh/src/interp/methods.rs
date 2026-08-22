@@ -58,8 +58,17 @@ pub(crate) fn unary(op: UnOp, value: &Value) -> Result<Value, Error> {
 pub(crate) fn binary(op: BinOp, lhs: &Value, rhs: &Value) -> Result<Value, Error> {
     use BinOp::*;
     match op {
-        Eq => return Ok(Value::Bool(equals(lhs, rhs))),
-        Ne => return Ok(Value::Bool(!equals(lhs, rhs))),
+        Eq | Ne => {
+            if let Some(other) = bool_against_something_else(lhs, rhs) {
+                return Err(Error::runtime(format!(
+                    "cannot compare bool with {other}; write `if condition` or \
+                     `if !condition` rather than comparing it to a value of \
+                     another type"
+                )));
+            }
+            let same = equals(lhs, rhs);
+            return Ok(Value::Bool(if op == Eq { same } else { !same }));
+        }
         _ => {}
     }
     // String concatenation: `+` with a string on either side stringifies the
@@ -115,6 +124,20 @@ pub(crate) fn binary(op: BinOp, lhs: &Value, rhs: &Value) -> Result<Value, Error
 /// `json-null-eq-probe.rh` shape reads.
 fn equals(lhs: &Value, rhs: &Value) -> bool {
     lhs == rhs
+}
+
+/// The type on the other side, when exactly one side is a bool.
+///
+/// `condition == 0` is how a guard was written when a bool was an int, and
+/// answering `false` makes the guard never fire. `"a" == 1` is still false:
+/// a string genuinely is not an int. Only bool has a truthy reading waiting
+/// to be assumed.
+fn bool_against_something_else<'a>(lhs: &'a Value, rhs: &'a Value) -> Option<&'static str> {
+    match (lhs, rhs) {
+        (Value::Bool(_), Value::Bool(_)) => None,
+        (Value::Bool(_), other) | (other, Value::Bool(_)) => Some(other.type_name()),
+        _ => None,
+    }
 }
 
 pub(crate) fn index(base: &Value, index: &Value) -> Result<Value, Error> {
