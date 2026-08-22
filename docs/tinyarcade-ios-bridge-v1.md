@@ -100,6 +100,14 @@ clean reactivation and the exact keyboard map. This is deterministic adapter
 evidence, not a claim that Bluetooth latency, physical button feel or a real
 keyboard/controller has been tested on hardware.
 
+The real App keeps this full-state device contract outside its edge-triggered
+guests. Each route remembers the last set per Apple source, sends only rising
+buttons as zero-time press/release ticks, and handles Menu as native pause.
+App-target tests execute the bundled Depth Well cartridge to observe one active
+piece movement and the bundled Signal Lock cartridge to observe one ring turn;
+repeating the same held value changes neither game, and held Menu toggles pause
+only once.
+
 On scene deactivation the app calls `deactivateAndSave(to:)`. The session clears
 all inputs, becomes inactive before persistence, and rejects further input or
 ticks even if storage fails. A runtime/suspend error marks the session failed;

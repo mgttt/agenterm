@@ -27,6 +27,9 @@ test -f "$SIGNAL_RUNTIME"
 grep -Fq 'private let cartridgeTonePlayer = TinyArcadeTonePlayer()' "$AUDIO_OWNER"
 grep -Fq 'try? cartridgeTonePlayer.play([tone])' "$AUDIO_OWNER"
 grep -Fq 'testRealCartridgeToneUsesRuntimePlayerAndDeactivates' "$AUDIO_TEST"
+grep -Fq 'testAppleInputUsesRisingEdgesAndMenuOwnsPause' "$AUDIO_TEST"
+grep -Fq 'testSignalAppleInputUsesRisingEdgesAndMenuOwnsPause' \
+  "$CONSUMER/App/Tests/BundledSignalLockCartridgeRuntimeTests.swift"
 grep -Fq 'perform(tone, hapticCue:' "$DEPTH_SCREEN"
 grep -Fq 'perform(tone, hapticCue:' "$SIGNAL_SCREEN"
 grep -Fq 'private var session: TinyArcadeGameSessionV1' "$DEPTH_RUNTIME"
@@ -80,5 +83,5 @@ test -f "$app"
 cmp "$producer" "$consumed"
 nm -gj "$app" | grep -Fqx '_tinyarcade_v1_completion_create'
 
-echo 'OK: exact current-main tinyvm archive and ABI v1.10 run in the real arm64 App target'
+echo 'OK: exact current-main tinyvm archive and ABI v1.10 run in the real arm64 App target with behavioral Apple input proofs'
 shasum -a 256 "$producer" "$consumed"

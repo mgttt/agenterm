@@ -87,6 +87,7 @@ tinyvm iOS game runtime
 │   ├── Swift ownership/threading     [x]
 │   ├── input + monotonic clock owner [x]
 │   │   └── Apple keyboard/gamepad adapter [x]
+│   │       └── real App rising-edge behavior [x]
 │   ├── frame pacing + scene state    [x]
 │   ├── stable two-pass copy lengths  [x]
 │   ├── indexed 2D presentation       [x]
@@ -4098,3 +4099,21 @@ executable needed a fourth explicit 16 KiB graduation step. The executable PRD
 trace now binds 130 completed claims. Physical
 keyboard/gamepad latency and feel, physical iPhone lifecycle and TestFlight
 evidence remain open, so the persistent goal stays active.
+
+## One-hundred-thirtieth executable increment — real-App input behavior
+
+The consumer gate no longer treats Apple input integration as a compile-only
+property. Both live App view models expose their platform-value receiver to the
+App test target while keeping device discovery in the SDK owner. They remember
+the complete state for each source, derive rising edges independently, execute
+each newly pressed gameplay button exactly once and route Menu to native pause.
+
+Evidence on 2026-08-22: Nostalgia Arcade consumer commit `f324f06` sends a
+synthetic Apple source value through each real view model. The bundled Depth
+Well `.wasm` moves its active piece exactly one cell; the bundled Signal Lock
+`.wasm` rotates its first ring exactly once. Repeating the held value changes
+neither guest, and repeating held Menu does not toggle pause twice. The counted
+consumer gate now passes eight Depth Well tests, five Signal Lock tests, one
+two-game UI journey and an arm64 device Release build. The executable PRD trace
+now binds 131 completed claims. Physical controller/keyboard feel and latency
+remain open, so the persistent goal stays active.
