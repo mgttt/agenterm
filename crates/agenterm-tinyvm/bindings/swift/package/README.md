@@ -44,6 +44,11 @@ Use `tickMedia` for the discriminated `grid3d/v1` or `indexed2d/v1` render
 frame. Existing Depth Well integrations may keep using the `grid3d/v1`-only
 `tick` convenience.
 
+For 3D cartridges, render with `TinyArcadeGrid3DFrame.forEachCell`. It walks
+typed, validated cell values directly over the frame's immutable storage and
+does not allocate a second per-frame array. The `cells` property remains a
+compatibility materialization for non-hot paths.
+
 After init or any tick/suspend/resume attempt, call `lastExecutionStats()` for
 deterministic Wasm instruction, memory/table, native-dispatch and output-byte
 evidence. Guest traps update the record; host input rejected before execution

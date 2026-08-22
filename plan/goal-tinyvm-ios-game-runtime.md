@@ -100,6 +100,8 @@ tinyvm iOS game runtime
 │   │   ├── bounded app metadata hot path [x]
 │   │   ├── scoped immutable frame views [x]
 │   │   └── single-buffer RGBA expansion [x]
+│   ├── grid3D presentation           [x]
+│   │   └── allocation-free typed cell iteration [x]
 │   ├── bounded native tone playback  [x]
 │   │   ├── interruption / route / reset owner [x]
 │   │   └── single-buffer WAV + bounded wave LRU [x]
@@ -4320,3 +4322,25 @@ The real App consumes the exact ABI v1.13 archive with SHA-256
 passes eight Depth Well tests, five Signal Lock tests, one UI journey and an
 unsigned arm64 device Release build. Physical-device and TestFlight evidence
 remain open, so the persistent goal stays active.
+
+## One-hundred-thirty-ninth executable increment — allocation-free grid3d iteration
+
+The Swift SDK no longer materializes and retains a second
+`[TinyArcadeGridCell]` for every validated `grid3d/v1` frame. The frame owns its
+single immutable `Data` storage and exposes `cellCount` plus typed synchronous
+`forEachCell`; the existing `cells` property remains an explicitly allocating
+compatibility view. Nostalgia Arcade's live SceneKit Depth Well renderer now
+uses the typed iterator, so ordinary display ticks do not allocate a cell array.
+
+Evidence on 2026-08-22: the linked Swift black box compares all borrowed cells
+with the compatibility materialization, and the bridge gate rejects restoring a
+stored public cell array. The 141-claim executable PRD map, complete all-feature
+suite, four-cartridge tinyvm/JSC/H5 differential, warnings-denied Clippy,
+rustfmt, ShellCheck and the stripped 101,256-byte static-core gate pass. Default
+iOS consumers link at 1,797,688 bytes arm64 and 1,895,192 bytes x86_64; opt-in
+SIMD consumers link at 1,798,456 / 1,899,216 bytes, all inside the existing
+finite ceilings. The real App passes eight Depth Well tests, five Signal Lock
+tests, the two-cartridge UI journey and an arm64 device Release build while
+rendering Depth Well through `forEachCell`. Physical-iPhone lifecycle and the
+processing/install state of the replacement TestFlight build remain external
+evidence, so the persistent goal stays active.

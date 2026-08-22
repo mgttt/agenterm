@@ -36,6 +36,12 @@ kind is known, unknown flag bits are rejected and trailing bytes are forbidden.
 Consumers use `kind` to draw settled, ghost and active cells in stable visual
 priority independent of record order.
 
+The Swift SDK owns the immutable frame bytes and exposes typed cells through
+`TinyArcadeGrid3DFrame.forEachCell`, so SceneKit or Metal renderers can walk the
+validated records without building another cell array each frame. The `cells`
+property is retained as an allocating compatibility view; it is not the render
+hot path.
+
 ## `tinyarcade:indexed2d/v1`
 
 The indexed frame is a complete, uncompressed 2D pixel plane. Its 16-byte

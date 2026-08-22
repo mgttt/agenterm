@@ -274,7 +274,17 @@ public struct TinyArcadeGrid3DFrame: Sendable {
     public let clearedDecks: UInt32
     public let level: UInt32
     public let isGameOver: Bool
-    public let cells: [TinyArcadeGridCell]
+    public let cellCount: Int
+    /// Compatibility materialization. Frame renderers should use
+    /// `forEachCell` to avoid allocating a second per-frame cell array.
+    public var cells: [TinyArcadeGridCell] {
+        var decoded: [TinyArcadeGridCell] = []
+        decoded.reserveCapacity(cellCount)
+        forEachCell { decoded.append($0) }
+        return decoded
+    }
+    private let storage: Data
+    private let cellRange: Range<Int>
 
     fileprivate init(data: Data) throws {
         guard data.count >= 32,
@@ -297,26 +307,56 @@ public struct TinyArcadeGrid3DFrame: Sendable {
             throw Self.decodeError("invalid grid3d frame size or flags")
         }
         isGameOver = flags & 1 != 0
-        var decoded: [TinyArcadeGridCell] = []
-        decoded.reserveCapacity(count)
+        cellCount = count
+        storage = data
+        cellRange = 32..<data.count
         for index in 0..<count {
             let offset = 32 + index * 8
-            let cell = TinyArcadeGridCell(
-                x: data[offset],
-                y: data[offset + 1],
-                z: data[offset + 2],
-                kind: data[offset + 3],
-                rgba: Self.u32(data, offset + 4)
-            )
+            let cell = Self.cell(data, offset)
             guard UInt16(cell.x) < width,
                   UInt16(cell.y) < depth,
                   UInt16(cell.z) < height,
                   (1...3).contains(cell.kind) else {
                 throw Self.decodeError("invalid grid3d cell")
             }
-            decoded.append(cell)
         }
-        cells = decoded
+    }
+
+    /// Iterates typed, already-validated cell records directly from immutable
+    /// Swift-owned frame storage. No cell array or record bytes are copied, and
+    /// the borrowed buffer cannot escape this synchronous call.
+    public func forEachCell(_ body: (TinyArcadeGridCell) throws -> Void) rethrows {
+        try storage.withUnsafeBytes { bytes in
+            for offset in stride(from: cellRange.lowerBound, to: cellRange.upperBound, by: 8) {
+                try body(Self.cell(bytes, offset))
+            }
+        }
+    }
+
+    private static func cell(_ data: Data, _ offset: Int) -> TinyArcadeGridCell {
+        TinyArcadeGridCell(
+            x: data[offset],
+            y: data[offset + 1],
+            z: data[offset + 2],
+            kind: data[offset + 3],
+            rgba: u32(data, offset + 4)
+        )
+    }
+
+    private static func cell(
+        _ bytes: UnsafeRawBufferPointer,
+        _ offset: Int
+    ) -> TinyArcadeGridCell {
+        TinyArcadeGridCell(
+            x: bytes[offset],
+            y: bytes[offset + 1],
+            z: bytes[offset + 2],
+            kind: bytes[offset + 3],
+            rgba: UInt32(bytes[offset + 4])
+                | UInt32(bytes[offset + 5]) << 8
+                | UInt32(bytes[offset + 6]) << 16
+                | UInt32(bytes[offset + 7]) << 24
+        )
     }
 
     fileprivate static func u16(_ data: Data, _ offset: Int) -> UInt16 {

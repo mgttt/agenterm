@@ -923,7 +923,11 @@ struct TinyArcadeSmoke {
         precondition(frame.grid3D.width == 5)
         precondition(frame.grid3D.depth == 5)
         precondition(frame.grid3D.height == 10)
+        precondition(frame.grid3D.cellCount == 8)
         precondition(frame.grid3D.cells.count == 8)
+        var borrowedCells: [TinyArcadeGridCell] = []
+        frame.grid3D.forEachCell { borrowedCells.append($0) }
+        precondition(borrowedCells == frame.grid3D.cells)
         precondition(frame.tones.isEmpty)
         let snapshot = try runtime.suspend()
         let restored = try TinyArcadeRuntimeV1(

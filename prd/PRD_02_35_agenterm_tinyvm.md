@@ -134,7 +134,8 @@ agenterm-tinyvm (35)                                      [~]
 │   │   ├── bounded app metadata hot path                 [x]
 │   │   ├── scoped immutable frame views                  [x]
 │   │   └── single-buffer RGBA expansion                  [x]
-│   ├── grid3d presentation                              [~]
+│   ├── grid3d presentation                              [x]
+│   │   └── allocation-free typed cell iteration          [x]
 │   ├── tones playback                                   [~]
 │   │   ├── bounded PCM tone synthesis                    [x]
 │   │   ├── interruption / route / reset owner             [x]
@@ -340,7 +341,8 @@ itself a native implementation or distribution authority.
 
 Media is discriminated and bounded:
 
-- `tinyarcade:grid3d/v1` — logical 3D grid records for Depth Well–style scenes.
+- `tinyarcade:grid3d/v1` — logical 3D grid records for Depth Well–style scenes;
+  Swift owns one immutable frame and iterates typed cells without a second array.
 - `tinyarcade:indexed2d/v1` — indexed pixels plus palette for classic 2D games.
 - `tinyarcade:tones/v1` — bounded sequential tone events and aggregate duration.
 

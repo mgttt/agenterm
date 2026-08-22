@@ -10,6 +10,15 @@ TARGET_DIR=${CARGO_TARGET_DIR:-"$ROOT/target/tinyarcade-ios-smoke"}
 CARGO=${CARGO:-cargo}
 RUST_FEATURES=${TINYVM_XCFRAMEWORK_FEATURES:-ios-c-api}
 
+grep -Fq 'public func forEachCell(' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'frame.grid3D.forEachCell' \
+  "$CRATE/tests/ios/TinyArcadeSmoke.swift"
+if grep -Fq 'public let cells: [TinyArcadeGridCell]' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
+  echo "grid3d hot path must not store a second decoded cell array" >&2
+  exit 1
+fi
 grep -Fq 'var rgba = Data(count: pixels.count * 4)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 if grep -Fq 'bytes.reserveCapacity(pixels.count * 4)' \
