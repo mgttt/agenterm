@@ -2784,6 +2784,16 @@ missing function or same-name signature mismatch. Keep the old fail-fast API as
 a wrapper over the report so runtime callers remain simple while CLI/UI callers
 can give actionable diagnostics without parsing error prose.
 
+When that compatibility result crosses a CLI boundary, do not call
+`key=value` lines a machine contract. Add an explicit schema name and integer
+version, emit exactly one JSON object on stdout, keep stderr empty for all
+reportable outcomes, and preserve nonzero exit status for incompatible or
+invalid input. Represent valid-but-unsupported and malformed input separately;
+use arrays for features/imports/issues, nullable available arities for missing
+functions, correct control-character escaping and deterministic ordering. Keep
+paths, timestamps and callbacks out so identical cartridge/profile bytes yield
+identical reports.
+
 Boundary benchmarks must measure the direction and ownership operation they
 claim. Host-to-guest calls plus an external memory view do not measure a guest-
 to-host import. Use one validated Wasm fixture with explicit wrapper exports,

@@ -835,6 +835,70 @@ fn host_profile_cli_publishes_inspects_and_checks_without_execution() {
         String::from_utf8_lossy(&checked.stdout)
             .contains("OK: cartridge is statically compatible with exact host profile")
     );
+    let checked_json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "check-profile",
+            cartridge.to_str().expect("cartridge path"),
+            profile.to_str().expect("profile path"),
+            "--json",
+        ])
+        .output()
+        .expect("check cartridge host profile as JSON");
+    assert!(checked_json.status.success());
+    assert!(checked_json.stderr.is_empty());
+    let checked_wire: serde_json::Value =
+        serde_json::from_slice(&checked_json.stdout).expect("decode compatible JSON report");
+    assert_eq!(
+        checked_wire["schema"],
+        "tinyarcade-host-compatibility-report"
+    );
+    assert_eq!(checked_wire["schema_version"], 1);
+    assert_eq!(checked_wire["valid"], true);
+    assert_eq!(checked_wire["compatible"], true);
+    assert_eq!(checked_wire["cartridge"]["game_id"], "test.game");
+    assert_eq!(checked_wire["host_profile"]["bytes"], original.len());
+    assert_eq!(checked_wire["unsupported_features"], serde_json::json!([]));
+    assert_eq!(checked_wire["issues"], serde_json::json!([]));
+    assert_eq!(checked_wire["issue_count"], 0);
+    let checked_object = checked_wire.as_object().expect("JSON report object");
+    assert_eq!(checked_object.len(), 11);
+    for key in [
+        "schema",
+        "schema_version",
+        "valid",
+        "compatible",
+        "cartridge",
+        "host_profile",
+        "wasm_features",
+        "unsupported_features",
+        "function_imports",
+        "issues",
+        "issue_count",
+    ] {
+        assert!(checked_object.contains_key(key), "missing JSON field {key}");
+    }
+    assert_eq!(
+        checked_wire["cartridge"]
+            .as_object()
+            .expect("cartridge report object")
+            .len(),
+        6
+    );
+    assert_eq!(checked_wire["function_imports"], serde_json::json!([]));
+    let repeated_json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "check-profile",
+            cartridge.to_str().expect("cartridge path"),
+            profile.to_str().expect("profile path"),
+            "--json",
+        ])
+        .output()
+        .expect("repeat JSON compatibility report");
+    assert!(repeated_json.status.success());
+    assert_eq!(repeated_json.stdout, checked_json.stdout);
+    assert!(repeated_json.stderr.is_empty());
 
     let native_cartridge = directory.path().join("native.wasm");
     std::fs::write(
@@ -868,6 +932,101 @@ fn host_profile_cli_publishes_inspects_and_checks_without_execution() {
     assert!(
         String::from_utf8_lossy(&rejected.stderr)
             .contains("host profile has incompatible capabilities")
+    );
+
+    let rejected_json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "check-profile",
+            native_cartridge.to_str().expect("native cartridge path"),
+            profile.to_str().expect("profile path"),
+            "--json",
+        ])
+        .output()
+        .expect("report unavailable native import as JSON");
+    assert!(!rejected_json.status.success());
+    assert!(rejected_json.stderr.is_empty());
+    let rejected_wire: serde_json::Value =
+        serde_json::from_slice(&rejected_json.stdout).expect("decode incompatible JSON report");
+    assert_eq!(rejected_wire["valid"], true);
+    assert_eq!(rejected_wire["compatible"], false);
+    assert_eq!(rejected_wire["issue_count"], 1);
+    assert_eq!(rejected_wire["issues"][0]["kind"], "missing_function");
+    assert_eq!(rejected_wire["issues"][0]["module"], "fan:physics/v1");
+    assert_eq!(rejected_wire["issues"][0]["field"], "step_world");
+    assert_eq!(rejected_wire["issues"][0]["required_params"], 2);
+    assert_eq!(rejected_wire["issues"][0]["required_results"], 1);
+    assert!(rejected_wire["issues"][0]["available_params"].is_null());
+    assert!(rejected_wire["issues"][0]["available_results"].is_null());
+    assert_eq!(
+        rejected_wire["function_imports"][0]
+            .as_object()
+            .expect("import report object")
+            .len(),
+        6
+    );
+
+    let wrong_profile = directory.path().join("wrong-signature.tahost");
+    let mut wrong = must_ok(
+        HostProfileV1::new(Limits::default(), GameLimits::default()),
+        "wrong-signature profile",
+    );
+    must_ok(
+        wrong.add_native_function("fan:physics/v1", "step_world", 1, 0, 1),
+        "wrong-signature function",
+    );
+    std::fs::write(
+        &wrong_profile,
+        must_ok(wrong.encode(), "encode wrong-signature profile"),
+    )
+    .expect("write wrong-signature profile");
+    let signature_json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "check-profile",
+            native_cartridge.to_str().expect("native cartridge path"),
+            wrong_profile.to_str().expect("wrong profile path"),
+            "--json",
+        ])
+        .output()
+        .expect("report signature mismatch as JSON");
+    assert!(!signature_json.status.success());
+    let signature_wire: serde_json::Value =
+        serde_json::from_slice(&signature_json.stdout).expect("decode signature JSON report");
+    assert_eq!(signature_wire["issues"][0]["kind"], "signature_mismatch");
+    assert_eq!(signature_wire["issues"][0]["available_params"], 1);
+    assert_eq!(signature_wire["issues"][0]["available_results"], 0);
+
+    let malformed = directory.path().join("malformed.wasm");
+    std::fs::write(&malformed, b"not-wasm").expect("write malformed cartridge");
+    let malformed_json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "check-profile",
+            malformed.to_str().expect("malformed cartridge path"),
+            profile.to_str().expect("profile path"),
+            "--json",
+        ])
+        .output()
+        .expect("report malformed cartridge as JSON");
+    assert!(!malformed_json.status.success());
+    assert!(malformed_json.stderr.is_empty());
+    let malformed_wire: serde_json::Value =
+        serde_json::from_slice(&malformed_json.stdout).expect("decode invalid JSON report");
+    assert_eq!(malformed_wire["schema_version"], 1);
+    assert_eq!(malformed_wire["valid"], false);
+    assert_eq!(malformed_wire["compatible"], false);
+    assert!(
+        malformed_wire["error"]
+            .as_str()
+            .is_some_and(|message| !message.is_empty())
+    );
+    assert_eq!(
+        malformed_wire
+            .as_object()
+            .expect("invalid report object")
+            .len(),
+        5
     );
 }
 
@@ -1480,6 +1639,30 @@ fn exact_host_profile_reports_simd_subset_mismatch_without_execution() {
     assert!(stdout.contains("compatibility_issues=1"));
     assert!(stdout.contains("issue=wasm-feature.simd-signed-pcm-v1 reason=unsupported"));
     assert!(stdout.contains("compatible=false"));
+
+    let checked_json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "check-profile",
+            cartridge.to_str().expect("cartridge path"),
+            profile.to_str().expect("profile path"),
+            "--json",
+        ])
+        .output()
+        .expect("run feature-aware JSON profile check");
+    assert!(!checked_json.status.success());
+    assert!(checked_json.stderr.is_empty());
+    let wire: serde_json::Value =
+        serde_json::from_slice(&checked_json.stdout).expect("decode feature JSON report");
+    assert_eq!(wire["valid"], true);
+    assert_eq!(wire["compatible"], false);
+    assert_eq!(wire["wasm_features"], serde_json::json!(["simd"]));
+    assert_eq!(
+        wire["unsupported_features"],
+        serde_json::json!(["simd-signed-pcm-v1"])
+    );
+    assert_eq!(wire["issues"], serde_json::json!([]));
+    assert_eq!(wire["issue_count"], 1);
 }
 
 #[test]

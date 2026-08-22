@@ -4519,3 +4519,32 @@ passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
 journey and an arm64 device Release build. Physical-iPhone lifecycle and
 TestFlight install/play evidence remain open, so the persistent goal stays
 active.
+
+## One-hundred-forty-sixth executable increment — machine compatibility report
+
+The converter-facing `cartridge check-profile` command now accepts a trailing
+`--json` and emits the versioned
+`tinyarcade-host-compatibility-report` schema 1. It preserves the existing text
+interface while giving creator sites and CI one deterministic object containing
+canonical cartridge identity, standard feature usage, native capabilities,
+typed imports, unsupported feature families and every missing or
+wrong-signature host function. Compatible, incompatible and malformed-input
+paths all emit one parseable object; valid-but-unsupported is distinct from
+invalid input, stderr stays empty for reportable outcomes, and the process exit
+status remains authoritative. The CLI owns a complete JSON string escaper, so
+this adds no serializer or `std` dependency to the `no_std` runtime product.
+
+Evidence on 2026-08-22: independent `serde_json` tests decode the exact schema
+for compatible, missing-function, signature-mismatch, unsupported-SIMD and
+malformed cases, round-trip every JSON control-character class and prove
+repeated input produces byte-identical stdout. A real 6,116-byte Depth Well
+cartridge reports compatible against the canonical 72-byte default TAH1
+profile with bulk-memory/sign-extension usage and zero issues. The 154-claim
+executable PRD map, complete all-feature suite, warnings-denied Clippy, rustfmt
+and the unchanged 101,256-byte stripped static core pass. The real Nostalgia
+Arcade consumer passes eight Depth Well tests, five Signal Lock tests, the
+two-cartridge UI journey and an arm64 device Release build while consuming the
+exact current archive (SHA-256
+`582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`).
+Physical-iPhone lifecycle and TestFlight install/play evidence remain open, so
+the persistent goal stays active.

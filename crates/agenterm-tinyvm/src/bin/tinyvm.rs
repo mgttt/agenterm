@@ -34,6 +34,12 @@ use agenterm_tinyvm::{MAX_REPLAY_BYTES, ReplayRecorderV1, ReplayTraceV1};
 const MEM_CELLS: usize = 4_096;
 const MAX_CARTRIDGE_BYTES: u64 = 2 * 1024 * 1024;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ReportFormat {
+    Text,
+    Json,
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
@@ -67,8 +73,13 @@ fn main() -> ExitCode {
                 (Some(path), None) => run_cartridge(&path, true),
                 _ => usage(),
             },
-            Some("check-profile") => match (args.next(), args.next(), args.next()) {
-                (Some(path), Some(profile), None) => run_cartridge_profile(&path, &profile),
+            Some("check-profile") => match (args.next(), args.next(), args.next(), args.next()) {
+                (Some(path), Some(profile), None, None) => {
+                    run_cartridge_profile(&path, &profile, ReportFormat::Text)
+                }
+                (Some(path), Some(profile), Some(format), None) if format == "--json" => {
+                    run_cartridge_profile(&path, &profile, ReportFormat::Json)
+                }
                 _ => usage(),
             },
             Some("attach-manifest") => {
@@ -160,7 +171,7 @@ fn usage() -> ExitCode {
     eprintln!("  tinyvm module validate FILE.wasm");
     eprintln!("  tinyvm cartridge inspect FILE.wasm");
     eprintln!("  tinyvm cartridge check FILE.wasm");
-    eprintln!("  tinyvm cartridge check-profile FILE.wasm HOST.tahost");
+    eprintln!("  tinyvm cartridge check-profile FILE.wasm HOST.tahost [--json]");
     eprintln!(
         "  tinyvm cartridge attach-manifest INPUT.wasm OUTPUT.wasm GAME_ID GAME_VERSION ABI_VERSION STATE_VERSION"
     );
@@ -215,26 +226,7 @@ fn run_module_validate(path: &str) -> ExitCode {
                     "absent"
                 }
             );
-            let mut names = Vec::new();
-            for (used, name) in [
-                (report.features.bulk_memory, "bulk-memory"),
-                (report.features.sign_extension, "sign-extension"),
-                (
-                    report.features.nontrapping_float_to_int,
-                    "nontrapping-float-to-int",
-                ),
-                (report.features.multi_value, "multi-value"),
-                (report.features.reference_types, "reference-types"),
-                (report.features.multiple_tables, "multiple-tables"),
-                (report.features.multiple_memories, "multiple-memories"),
-                (report.features.extended_const, "extended-const"),
-                (report.features.tail_call, "tail-call"),
-                (report.features.simd, "simd"),
-            ] {
-                if used {
-                    names.push(name);
-                }
-            }
+            let names = wasm_feature_names(report.features).collect::<Vec<_>>();
             println!(
                 "standard_features={}",
                 if names.is_empty() {
@@ -998,7 +990,11 @@ fn run_host_profile_inspect(path: &str) -> ExitCode {
     }
 }
 
-fn run_cartridge_profile(cartridge_path: &str, profile_path: &str) -> ExitCode {
+fn run_cartridge_profile(
+    cartridge_path: &str,
+    profile_path: &str,
+    format: ReportFormat,
+) -> ExitCode {
     let result = (|| {
         let wasm = read_cartridge(cartridge_path).map_err(str::to_string)?;
         let profile_bytes = read_host_profile(profile_path)?;
@@ -1007,10 +1003,21 @@ fn run_cartridge_profile(cartridge_path: &str, profile_path: &str) -> ExitCode {
         let report = profile
             .compatibility_report(&wasm)
             .map_err(|error| error.message().to_string())?;
-        Ok::<_, String>((report, profile_bytes.len()))
+        Ok::<_, String>((report, wasm.len(), profile_bytes.len()))
     })();
     match result {
-        Ok((report, profile_bytes)) => {
+        Ok((report, wasm_bytes, profile_bytes)) if format == ReportFormat::Json => {
+            println!(
+                "{}",
+                compatibility_report_json(&report, wasm_bytes, profile_bytes)
+            );
+            if report.is_compatible() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Ok((report, _, profile_bytes)) => {
             println!("game_id={}", report.descriptor.manifest.game_id);
             println!("game_version={}", report.descriptor.manifest.game_version);
             println!("profile_bytes={profile_bytes}");
@@ -1046,10 +1053,179 @@ fn run_cartridge_profile(cartridge_path: &str, profile_path: &str) -> ExitCode {
             }
         }
         Err(message) => {
-            eprintln!("tinyvm: {message}");
+            if format == ReportFormat::Json {
+                println!("{}", compatibility_error_json(&message));
+            } else {
+                eprintln!("tinyvm: {message}");
+            }
             ExitCode::FAILURE
         }
     }
+}
+
+fn compatibility_report_json(
+    report: &agenterm_tinyvm::HostCompatibilityReportV1,
+    wasm_bytes: usize,
+    profile_bytes: usize,
+) -> String {
+    let descriptor = &report.descriptor;
+    let manifest = &descriptor.manifest;
+    let unsupported = report.unsupported_features.names().collect::<Vec<_>>();
+    let mut output = String::new();
+    output.push_str("{\"schema\":\"tinyarcade-host-compatibility-report\",\"schema_version\":1,\"valid\":true,\"compatible\":");
+    output.push_str(if report.is_compatible() {
+        "true"
+    } else {
+        "false"
+    });
+    output.push_str(",\"cartridge\":{\"game_id\":");
+    push_json_string(&mut output, &manifest.game_id);
+    output.push_str(",\"game_version\":");
+    push_json_string(&mut output, &manifest.game_version);
+    output.push_str(",\"abi_version\":");
+    output.push_str(&manifest.abi_version.to_string());
+    output.push_str(",\"state_version\":");
+    output.push_str(&manifest.state_version.to_string());
+    output.push_str(",\"wasm_bytes\":");
+    output.push_str(&wasm_bytes.to_string());
+    output.push_str(",\"native_capabilities\":[");
+    push_json_strings(
+        &mut output,
+        manifest.capabilities.iter().map(String::as_str),
+    );
+    output.push_str("]},\"host_profile\":{\"bytes\":");
+    output.push_str(&profile_bytes.to_string());
+    output.push_str("},\"wasm_features\":[");
+    push_json_strings(&mut output, wasm_feature_names(descriptor.features));
+    output.push_str("],\"unsupported_features\":[");
+    push_json_strings(&mut output, unsupported.iter().copied());
+    output.push_str("],\"function_imports\":[");
+    for (index, import) in descriptor.imports.iter().enumerate() {
+        if index != 0 {
+            output.push(',');
+        }
+        output.push_str("{\"module\":");
+        push_json_string(&mut output, &import.module);
+        output.push_str(",\"field\":");
+        push_json_string(&mut output, &import.field);
+        output.push_str(",\"class\":");
+        push_json_string(
+            &mut output,
+            if import.module == "tinyarcade:core/v1" {
+                "core"
+            } else {
+                "native"
+            },
+        );
+        output.push_str(",\"params\":");
+        output.push_str(&import.n_params.to_string());
+        output.push_str(",\"results\":");
+        output.push_str(&import.n_results.to_string());
+        output.push_str(",\"i32_only\":");
+        output.push_str(if import.i32_only { "true" } else { "false" });
+        output.push('}');
+    }
+    output.push_str("],\"issues\":[");
+    for (index, issue) in report.issues.iter().enumerate() {
+        if index != 0 {
+            output.push(',');
+        }
+        output.push_str("{\"kind\":");
+        push_json_string(
+            &mut output,
+            if issue.available_params.is_some() {
+                "signature_mismatch"
+            } else {
+                "missing_function"
+            },
+        );
+        output.push_str(",\"module\":");
+        push_json_string(&mut output, &issue.module);
+        output.push_str(",\"field\":");
+        push_json_string(&mut output, &issue.field);
+        output.push_str(",\"required_params\":");
+        output.push_str(&issue.required_params.to_string());
+        output.push_str(",\"required_results\":");
+        output.push_str(&issue.required_results.to_string());
+        output.push_str(",\"available_params\":");
+        push_json_option_u8(&mut output, issue.available_params);
+        output.push_str(",\"available_results\":");
+        push_json_option_u8(&mut output, issue.available_results);
+        output.push('}');
+    }
+    output.push_str("],\"issue_count\":");
+    output.push_str(&(unsupported.len() + report.issues.len()).to_string());
+    output.push('}');
+    output
+}
+
+fn compatibility_error_json(message: &str) -> String {
+    let mut output = String::from(
+        "{\"schema\":\"tinyarcade-host-compatibility-report\",\"schema_version\":1,\"valid\":false,\"compatible\":false,\"error\":",
+    );
+    push_json_string(&mut output, message);
+    output.push('}');
+    output
+}
+
+fn push_json_strings<'a>(output: &mut String, values: impl IntoIterator<Item = &'a str>) {
+    for (index, value) in values.into_iter().enumerate() {
+        if index != 0 {
+            output.push(',');
+        }
+        push_json_string(output, value);
+    }
+}
+
+fn push_json_option_u8(output: &mut String, value: Option<u8>) {
+    match value {
+        Some(value) => output.push_str(&value.to_string()),
+        None => output.push_str("null"),
+    }
+}
+
+fn push_json_string(output: &mut String, value: &str) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\u{08}' => output.push_str("\\b"),
+            '\u{0c}' => output.push_str("\\f"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            '\u{00}'..='\u{1f}' => {
+                let code = character as usize;
+                output.push_str("\\u00");
+                output.push(char::from(HEX[(code >> 4) & 0x0f]));
+                output.push(char::from(HEX[code & 0x0f]));
+            }
+            _ => output.push(character),
+        }
+    }
+    output.push('"');
+}
+
+fn wasm_feature_names(features: WasmFeatureUsage) -> impl Iterator<Item = &'static str> {
+    [
+        (features.bulk_memory, "bulk-memory"),
+        (features.sign_extension, "sign-extension"),
+        (
+            features.nontrapping_float_to_int,
+            "nontrapping-float-to-int",
+        ),
+        (features.multi_value, "multi-value"),
+        (features.reference_types, "reference-types"),
+        (features.multiple_tables, "multiple-tables"),
+        (features.multiple_memories, "multiple-memories"),
+        (features.extended_const, "extended-const"),
+        (features.tail_call, "tail-call"),
+        (features.simd, "simd"),
+    ]
+    .into_iter()
+    .filter_map(|(used, name)| used.then_some(name))
 }
 
 fn run_cartridge(path: &str, execute: bool) -> ExitCode {
@@ -1221,6 +1397,21 @@ fn run_eval(src: &str) -> ExitCode {
             eprintln!("tinyvm: {}", e.message());
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod json_tests {
+    use super::push_json_string;
+
+    #[test]
+    fn compatibility_json_strings_escape_every_json_control() {
+        let original = "quote=\" slash=\\ nul=\0 backspace=\u{08} formfeed=\u{0c} newline=\n return=\r tab=\t 中文";
+        let mut encoded = String::new();
+        push_json_string(&mut encoded, original);
+        let decoded: String = serde_json::from_str(&encoded).expect("decode escaped JSON string");
+        assert_eq!(decoded, original);
+        assert!(!encoded.as_bytes().iter().any(|byte| *byte < 0x20));
     }
 }
 

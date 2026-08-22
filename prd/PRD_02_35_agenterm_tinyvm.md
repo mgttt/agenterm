@@ -212,6 +212,7 @@ agenterm-tinyvm (35)                                      [~]
 │   │   └── size/resource budget retained per leaf        [x]
 │   ├── P3 — cartridge authoring ecosystem               [~]
 │   │   ├── converter/conformance ecosystem               [~]
+│   │   │   └── versioned JSON host-compatibility report   [x]
 │   │   ├── fan-authored standard .wasm                   [x]
 │   │   │   └── header-only C core v1 declarations        [x]
 │   │   └── external distribution after Apple approval    [ ]
@@ -464,6 +465,7 @@ Current evidence owners:
 - [Optional SIMD audio profile](../docs/tinyvm-simd-audio.md)
 - [JavaScriptCore public/private boundary](../docs/tinyarcade-javascriptcore-boundary.md)
 - [Converter conformance](../docs/tinyarcade-converter-conformance-v1.md)
+- [Host compatibility report v1](../docs/tinyarcade-host-compatibility-report-v1.md)
 - [C cartridge authoring](../docs/tinyarcade-c-authoring-v1.md)
 - [Catalog transport](../docs/tinyarcade-catalog-transport-v1.md)
 - [Catalog publisher](../docs/tinyarcade-catalog-publisher-v1.md)

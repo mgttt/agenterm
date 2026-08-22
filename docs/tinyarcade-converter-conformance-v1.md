@@ -25,6 +25,9 @@ cargo run -p agenterm-tinyvm --bin tinyvm -- \
 
 cargo run -p agenterm-tinyvm --bin tinyvm -- \
   cartridge check-profile path/to/game.wasm path/to/app-build.tahost
+
+cargo run -p agenterm-tinyvm --bin tinyvm -- \
+  cartridge check-profile path/to/game.wasm path/to/app-build.tahost --json
 ```
 
 `inspect` parses canonical identity/schema metadata and the normal WASM import
@@ -50,6 +53,13 @@ cartridge. Success reports zero compatibility issues; failure enumerates each
 missing native function or same-name signature mismatch with the exact required
 and available arities. Converter UI should surface those rows directly instead
 of reducing them to “unsupported game.”
+
+The optional trailing `--json` emits the stable, versioned
+[`tinyarcade-host-compatibility-report` v1](tinyarcade-host-compatibility-report-v1.md).
+Compatible, incompatible and malformed-input paths all produce one parseable
+object; exit status still distinguishes acceptance from rejection. This is the
+preferred interface for creator sites and CI. The original text output remains
+available for humans and existing scripts.
 
 For proposal diagnostics, `tinyvm module validate FILE.wasm` also prints the
 post-MVP families actually used by the accepted bytes as
@@ -191,6 +201,7 @@ policy and the signed catalog record.
 The normative wire details remain in:
 
 - `docs/tinyarcade-cartridge-abi-v1.md`
+- `docs/tinyarcade-host-compatibility-report-v1.md`
 - `docs/tinyarcade-media-stream-v1.md`
 - `docs/tinyarcade-signed-catalog-v1.md`
 - `docs/tinyarcade-catalog-transport-v1.md`
