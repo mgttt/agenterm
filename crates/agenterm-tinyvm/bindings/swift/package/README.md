@@ -47,6 +47,8 @@ output slots, so the ordinary `frame = try runtime.tickMedia(...)` pattern can
 retain the visible previous frame while the next slot is filled and then reuse
 both allocations after warm-up. Retaining more history remains safe: Swift
 copy-on-write separates an occupied slot rather than mutating an older frame.
+A warm non-empty slot passes its prior length directly to the C ABI, so stable
+output takes one copy call; an empty or growing output negotiates and retries.
 
 For 3D cartridges, render with `TinyArcadeGrid3DFrame.forEachCell`. It walks
 typed, validated cell values directly over the frame's immutable storage and

@@ -164,9 +164,21 @@ private struct TinyArcadeGameSessionSmoke {
 
         var current = try direct.tickMedia(buttons: 0, clockMilliseconds: 100)
         let firstSlotAddress = renderAddress(current)
+        precondition(
+            direct.lastRenderCopyCallCount == 2,
+            "an empty output slot must negotiate then copy its first nonempty frame"
+        )
         current = try direct.tickMedia(buttons: 0, clockMilliseconds: 101)
         let secondSlotAddress = renderAddress(current)
         precondition(firstSlotAddress != secondSlotAddress)
+        precondition(
+            direct.lastRenderCopyCallCount == 1,
+            "a warm equal-sized render slot must copy with one C call"
+        )
+        precondition(
+            direct.lastAudioCopyCallCount == 1,
+            "a warm or empty audio slot must complete with one C call"
+        )
         current = try direct.tickMedia(buttons: 0, clockMilliseconds: 102)
         precondition(
             renderAddress(current) == firstSlotAddress,

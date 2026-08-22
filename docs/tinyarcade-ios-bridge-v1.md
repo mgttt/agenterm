@@ -269,10 +269,12 @@ the main actor and provides explicit, idempotent close.
 
 ## Data transfer and errors
 
-Frame, snapshot, replay and metadata outputs use a two-stage copy protocol. A NULL/zero
-query writes the required length and returns `TINYARCADE_BUFFER_TOO_SMALL` for
-non-empty data. A later copy does not execute the guest again. Bytes are never
-NUL-terminated or retained in caller memory.
+Frame, snapshot, replay and metadata outputs use one capacity-aware copy
+protocol. Every call writes the required length. A caller with known capacity
+may copy directly; insufficient capacity returns
+`TINYARCADE_BUFFER_TOO_SMALL` without a partial write. A NULL/zero query is the
+initial-size path for non-empty data. A later copy does not execute the guest
+again. Bytes are never NUL-terminated or retained in caller memory.
 
 Every failing call records a static diagnostic in thread-local state. Read it
 immediately with `tinyarcade_v1_last_error`; the next ordinary bridge call
@@ -284,8 +286,8 @@ events to native rendering/audio code. `tickMedia` returns a discriminated
 render frame for either supported visual protocol; the original `tick` remains
 a source-compatible `grid3d/v1` convenience for existing Depth Well consumers.
 The C runtime handle recycles its prior completed render/audio storage through
-the next tick and replay-recording tick. It still exposes only the two-stage
-copy contract, clears the completed-frame state on error, and never lends Rust
+the next tick and replay-recording tick. It exposes only the capacity-aware copy
+contract, clears the completed-frame state on error, and never lends Rust
 storage across the ABI; steady frames therefore avoid rebuilding the bounded
 host buffers without weakening pointer ownership.
 
@@ -304,7 +306,10 @@ retains at most twice the configured render-plus-audio output bounds. If a
 caller retains additional frame history, Swift copy-on-write separates that
 occupied slot so the old value cannot change. A failed tick clears the selected
 slot's logical outputs while retaining bounded capacity for recovery, and
-`close()` releases the pool. No Rust pointer crosses the copy call.
+`close()` releases the pool. A non-empty warm slot also supplies its prior
+length as capacity, completing stable output in one C call; only an empty or
+growing slot needs size negotiation and retry. No Rust pointer crosses the copy
+call.
 `withPixelBytes` and
 `withApplicationMetadataBytes` then lend scoped, read-only views into that
 owner for native decoding and RGBA conversion; their pointers cannot escape

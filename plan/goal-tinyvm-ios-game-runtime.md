@@ -4765,3 +4765,29 @@ pass. The real Nostalgia Arcade consumer passes 13 cartridge unit tests, its
 two-game UI journey and an arm64 device Release build with the byte-identical
 ABI v1.13 archive. Physical-iPhone lifecycle/performance/audio and TestFlight
 install/play evidence remain open, so the persistent goal stays active.
+
+## One-hundred-fifty-fourth executable increment — steady-state direct output copy
+
+The C copy ABI is now documented for the capacity-aware behavior it has always
+enforced: every call reports the required length, insufficient capacity returns
+without a partial write, and callers with known capacity may copy directly.
+The Swift SDK uses that contract for each warm output slot. A stable non-empty
+render or audio stream now crosses the C boundary once instead of first issuing
+a redundant size query; an empty slot or a stream that grows still negotiates
+and retries, and the exact-length check remains mandatory after that retry. No
+Rust pointer crosses the ABI and no C struct, symbol or ABI version changes.
+
+The booted iOS Simulator black box counts the actual public C copy-function
+calls. It proves the first non-empty render in an empty slot takes the required
+query plus copy, then proves a warmed equal-sized Paddle Guard slot takes
+exactly one render call while empty/stable audio also completes in one. The
+existing A/B output-address reuse and retained-history COW checks still pass.
+Default consumers link at 1,796,312 bytes arm64 and 1,897,968 bytes x86_64;
+the opt-in SIMD pair links at 1,815,032 / 1,910,552 bytes. The default UIKit
+indexed2d loop averages 0.120 ms and the 600-frame Depth Well/Paddle Guard runs
+remain inside their 8 ms host budget. The all-feature suite, complete
+WABT/JavaScriptCore/H5 matrix and booted SIMD cartridge pass. The real
+Nostalgia Arcade target passes 13 cartridge unit tests, its two-game UI journey
+and an arm64 device Release build with the byte-identical ABI v1.13 archive.
+Physical-iPhone lifecycle/performance/audio and TestFlight install/play evidence
+remain open, so the persistent goal stays active.

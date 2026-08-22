@@ -391,10 +391,12 @@ tinyarcade_status_v1 tinyarcade_v1_replay_check(
     size_t replay_len,
     uint32_t* verified_steps);
 
-/* All copy calls use the same two-stage protocol. *output_len always receives
- * the required byte count. NULL/0 is a size query and returns
- * TINYARCADE_BUFFER_TOO_SMALL when the value is non-empty. Bytes are not
- * NUL-terminated. Frame bytes stay valid inside the handle until next tick. */
+/* All copy calls use the same capacity-aware protocol. *output_len always
+ * receives the required byte count. A caller may provide known capacity
+ * directly; insufficient capacity returns TINYARCADE_BUFFER_TOO_SMALL without
+ * a partial write. NULL/0 is a size query and returns that status when the
+ * value is non-empty. Bytes are not NUL-terminated. Frame bytes stay valid
+ * inside the handle until next tick. */
 tinyarcade_status_v1 tinyarcade_v1_copy_render(
     tinyarcade_runtime_v1* runtime,
     uint8_t* output,

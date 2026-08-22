@@ -2827,6 +2827,10 @@ public final class TinyArcadeRuntimeV1 {
     private var renderBuffers = Array(repeating: Data(), count: outputBufferSlotCount)
     private var audioBuffers = Array(repeating: Data(), count: outputBufferSlotCount)
     private var nextOutputBufferSlot = 0
+    #if TINYARCADE_OUTPUT_REUSE_TEST_HOOKS
+    private(set) var lastRenderCopyCallCount = 0
+    private(set) var lastAudioCopyCallCount = 0
+    #endif
 
     public init(
         cartridge: Data,
@@ -3005,8 +3009,23 @@ public final class TinyArcadeRuntimeV1 {
             let handle = try liveHandle()
             let slot = nextOutputBufferSlot
             try Self.check(tinyarcade_v1_tick(handle, buttons, clockMilliseconds))
-            try Self.copy(handle, tinyarcade_v1_copy_render, into: &renderBuffers[slot])
-            try Self.copy(handle, tinyarcade_v1_copy_audio, into: &audioBuffers[slot])
+            let renderCalls = try Self.copy(
+                handle,
+                tinyarcade_v1_copy_render,
+                into: &renderBuffers[slot]
+            )
+            let audioCalls = try Self.copy(
+                handle,
+                tinyarcade_v1_copy_audio,
+                into: &audioBuffers[slot]
+            )
+            #if TINYARCADE_OUTPUT_REUSE_TEST_HOOKS
+            lastRenderCopyCallCount = renderCalls
+            lastAudioCopyCallCount = audioCalls
+            #else
+            _ = renderCalls
+            _ = audioCalls
+            #endif
             let output = (renderBuffers[slot], audioBuffers[slot])
             nextOutputBufferSlot = (slot + 1) % Self.outputBufferSlotCount
             return output
@@ -3124,26 +3143,83 @@ public final class TinyArcadeRuntimeV1 {
 
     private func copy(_ handle: OpaquePointer, _ function: CopyFunction) throws -> Data {
         var data = Data()
-        try Self.copy(handle, function, into: &data)
+        _ = try Self.copy(handle, function, into: &data)
         return data
     }
 
+    @discardableResult
     private static func copy(
         _ handle: OpaquePointer,
         _ function: CopyFunction,
         into data: inout Data
-    ) throws {
+    ) throws -> Int {
+        if !data.isEmpty {
+            let available = data.count
+            var count = available
+            let status = data.withUnsafeMutableBytes { bytes in
+                function(
+                    handle,
+                    bytes.bindMemory(to: UInt8.self).baseAddress,
+                    bytes.count,
+                    &count
+                )
+            }
+            if status == TINYARCADE_OK {
+                guard count <= available else {
+                    throw TinyArcadeRuntimeError(
+                        status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                        message: "runtime output exceeded a successful copy capacity"
+                    )
+                }
+                if count == 0 {
+                    data.removeAll(keepingCapacity: true)
+                } else {
+                    data.count = count
+                }
+                return 1
+            }
+            if status != TINYARCADE_BUFFER_TOO_SMALL {
+                try Self.check(status)
+                throw TinyArcadeRuntimeError(
+                    status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                    message: "runtime output returned an unexpected copy status"
+                )
+            }
+            guard count > available else {
+                throw TinyArcadeRuntimeError(
+                    status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
+                    message: "runtime output returned an invalid required length"
+                )
+            }
+            data.count = count
+            let retry = data.withUnsafeMutableBytes { bytes in
+                function(
+                    handle,
+                    bytes.bindMemory(to: UInt8.self).baseAddress,
+                    bytes.count,
+                    &count
+                )
+            }
+            try Self.check(retry)
+            try Self.requireStableCopyLength(
+                count,
+                expected: data.count,
+                context: "runtime output"
+            )
+            return 2
+        }
+
         var count = 0
         let query = function(handle, nil, 0, &count)
         if count == 0 {
             try Self.check(query)
             data.removeAll(keepingCapacity: true)
-            return
+            return 1
         }
         guard query == TINYARCADE_BUFFER_TOO_SMALL else {
             try Self.check(query)
             data.removeAll(keepingCapacity: true)
-            return
+            return 1
         }
         data.count = count
         let status = data.withUnsafeMutableBytes { bytes in
@@ -3160,6 +3236,7 @@ public final class TinyArcadeRuntimeV1 {
             expected: data.count,
             context: "runtime output"
         )
+        return 2
     }
 
     private func string(handle: OpaquePointer, copyFunction: CopyFunction) throws -> String {

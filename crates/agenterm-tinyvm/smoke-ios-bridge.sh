@@ -34,7 +34,11 @@ grep -Fq 'private var renderBuffers = Array(repeating: Data(), count: outputBuff
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 grep -Fq 'private var audioBuffers = Array(repeating: Data(), count: outputBufferSlotCount)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
-grep -Fq 'try Self.copy(handle, tinyarcade_v1_copy_render, into: &renderBuffers[slot])' \
+grep -Fq 'into: &renderBuffers[slot]' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'if !data.isEmpty {' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'guard count > available else {' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 if grep -Fq 'bytes.reserveCapacity(pixels.count * 4)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
