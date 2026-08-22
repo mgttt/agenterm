@@ -167,6 +167,9 @@ the main actor that owns the native table. Handlers are retained only while
 their descriptors are encoded and are never called. The normative format and
 limits are in
 [`tinyarcade-host-profile-v1.md`](tinyarcade-host-profile-v1.md).
+Render, audio and state byte ceilings preserve zero exactly as a disabled or
+empty-only channel; zero never expands to a default. Thus the profile generated
+by Swift is the same configuration the C runtime enforces dynamically.
 
 `TinyArcadePrivateLibraryV1` turns that private opening into a complete local
 library transaction. It preflights exact bytes under core-only policy before

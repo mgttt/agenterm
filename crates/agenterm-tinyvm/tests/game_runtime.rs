@@ -1401,6 +1401,115 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
     ));
 }
 
+#[test]
+fn zero_game_output_limits_round_trip_and_disable_each_channel() {
+    let disabled = GameLimits {
+        max_render_bytes: 0,
+        max_audio_bytes: 0,
+        max_state_bytes: 0,
+    };
+    let profile = must_ok(
+        HostProfileV1::new(Limits::default(), disabled),
+        "profile with disabled game channels",
+    );
+    let encoded = must_ok(profile.encode(), "encode disabled game channels");
+    let decoded = must_ok(
+        HostProfileV1::decode(&encoded),
+        "decode disabled game channels",
+    );
+    let decoded_limits = decoded.game_limits();
+    assert_eq!(decoded_limits.max_render_bytes, 0);
+    assert_eq!(decoded_limits.max_audio_bytes, 0);
+    assert_eq!(decoded_limits.max_state_bytes, 0);
+    assert_eq!(
+        must_ok(decoded.encode(), "re-encode disabled channels"),
+        encoded
+    );
+
+    let output_wasm = game_module(&all_imports(), 1, &tick_with_outputs(3), &[1, 2, 3, 4, 5]);
+    let mut no_render = must_ok(
+        GameRuntime::from_bytes(
+            &output_wasm,
+            Limits::default(),
+            GameLimits {
+                max_render_bytes: 0,
+                max_audio_bytes: 2,
+                max_state_bytes: 4,
+            },
+            1,
+        ),
+        "load no-render runtime",
+    );
+    assert!(matches!(
+        no_render.tick(GameInput::default()),
+        Err(WasmError::Trap("game output budget"))
+    ));
+
+    let mut no_audio = must_ok(
+        GameRuntime::from_bytes(
+            &output_wasm,
+            Limits::default(),
+            GameLimits {
+                max_render_bytes: 3,
+                max_audio_bytes: 0,
+                max_state_bytes: 4,
+            },
+            1,
+        ),
+        "load no-audio runtime",
+    );
+    assert!(matches!(
+        no_audio.tick(GameInput::default()),
+        Err(WasmError::Trap("game output budget"))
+    ));
+
+    let mut no_state = must_ok(
+        GameRuntime::from_bytes(
+            &stateful_game_module(1, "test.no-state"),
+            Limits::default(),
+            GameLimits {
+                max_render_bytes: 8,
+                max_audio_bytes: 0,
+                max_state_bytes: 0,
+            },
+            1,
+        ),
+        "load no-state runtime",
+    );
+    assert!(matches!(
+        no_state.suspend(),
+        Err(WasmError::Trap("game state budget"))
+    ));
+
+    let mut empty_state_wasm = stateful_game_module(1, "test.empty-state");
+    for imported_call in [5u8, 6] {
+        let call = empty_state_wasm
+            .windows(6)
+            .position(|bytes| bytes == [0x41, 0x00, 0x41, 0x04, 0x10, imported_call])
+            .expect("four-byte state lifecycle call");
+        empty_state_wasm[call + 3] = 0;
+    }
+    let open_empty_state = || {
+        GameRuntime::from_bytes(
+            &empty_state_wasm,
+            Limits::default(),
+            GameLimits {
+                max_render_bytes: 8,
+                max_audio_bytes: 0,
+                max_state_bytes: 0,
+            },
+            1,
+        )
+    };
+    let mut empty_source = must_ok(open_empty_state(), "load empty-state source");
+    let snapshot = must_ok(empty_source.suspend(), "suspend explicit empty state");
+    let mut empty_target = must_ok(open_empty_state(), "load empty-state target");
+    must_ok(
+        empty_target.resume(&snapshot),
+        "resume explicit empty state",
+    );
+}
+
 #[cfg(feature = "replay")]
 #[test]
 fn replay_preserves_versioned_native_import_registration_boundary() {

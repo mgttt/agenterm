@@ -56,8 +56,11 @@ pub mod button {
 /// Host-owned byte ceilings for one rendered frame.
 #[derive(Clone, Copy)]
 pub struct GameLimits {
+    /// Zero disables core render submission for this runtime.
     pub max_render_bytes: usize,
+    /// Zero disables core audio submission for this runtime.
     pub max_audio_bytes: usize,
+    /// Zero admits only an explicitly submitted empty portable guest state.
     pub max_state_bytes: usize,
 }
 

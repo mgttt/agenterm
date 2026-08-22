@@ -2686,6 +2686,7 @@ mod tests {
         let mut config = unsafe { config() };
         config.max_call_depth = 37;
         config.max_activation_slots = 4096;
+        config.max_audio_bytes = 0;
         let mut probe = NativeProbe {
             calls: Cell::new(0),
             fail: Cell::new(false),
@@ -2741,6 +2742,7 @@ mod tests {
         let decoded = HostProfileV1::decode(&profile).expect("decode exported host profile");
         assert_eq!(decoded.vm_limits().max_call_depth, 37);
         assert_eq!(decoded.vm_limits().max_activation_slots, 4096);
+        assert_eq!(decoded.game_limits().max_audio_bytes, 0);
         assert!(profile.windows(module.len()).any(|value| value == module));
         assert_eq!(
             unsafe {

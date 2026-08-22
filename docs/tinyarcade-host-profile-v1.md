@@ -20,9 +20,9 @@ max_cartridge_bytes           u32; exactly 2 MiB
 max_table_elems               u32; non-zero aggregate across all tables
 max_memory_pages              u32; non-zero, 64 KiB per page
 max_steps_per_lifecycle       u64; non-zero
-max_render_bytes              u32; non-zero
-max_audio_bytes               u32; non-zero
-max_state_bytes               u32; non-zero
+max_render_bytes              u32; zero disables non-empty core render output
+max_audio_bytes               u32; zero disables non-empty core audio output
+max_state_bytes               u32; zero admits only explicitly submitted empty state
 grid3d_version                u16; exactly 1
 indexed2d_version             u16; exactly 1
 tones_version                 u16; exactly 1
@@ -54,6 +54,11 @@ host capability.
 Duplicate, unordered, malformed, unknown-version and trailing data fail closed.
 Changing any limit, media version, namespace, signature or quota changes the
 profile bytes and therefore its content hash.
+
+The three game byte ceilings use zero as an exact capability restriction, not
+as “unlimited” or “use a default.” This matches the runtime configuration: a
+guest attempting a non-empty submission traps at the normal output/state
+budget, while a stateless guest may explicitly save and restore zero bytes.
 
 ## Compatibility meaning
 

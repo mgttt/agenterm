@@ -363,11 +363,8 @@ fn validate_limits(vm: Limits, game: GameLimits) -> Result<(), WasmError> {
         || vm.max_call_depth > u32::MAX as usize
         || vm.max_activation_slots == 0
         || vm.max_activation_slots > u32::MAX as usize
-        || game.max_render_bytes == 0
         || game.max_render_bytes > u32::MAX as usize
-        || game.max_audio_bytes == 0
         || game.max_audio_bytes > u32::MAX as usize
-        || game.max_state_bytes == 0
         || game.max_state_bytes > u32::MAX as usize
     {
         return Err(WasmError::Trap("invalid host profile limits"));

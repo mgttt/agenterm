@@ -463,8 +463,11 @@ struct TinyArcadeSmoke {
                     return [0]
                 },
             ]
-        )
+        ) { config in
+            config.max_audio_bytes = 0
+        }
         precondition(hostProfile.encoded.prefix(4) == Data("TAH1".utf8))
+        precondition(hostProfile.encoded[36..<40].allSatisfy { $0 == 0 })
         let profileDescriptor = try hostProfile.inspectCompatibleCartridge(nativeBytes)
         precondition(profileDescriptor == descriptor)
         precondition(profileHandlerCalls == 0, "static profile check must not call app code")

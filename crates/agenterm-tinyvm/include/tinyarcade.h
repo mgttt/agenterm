@@ -36,6 +36,9 @@ typedef enum tinyarcade_cartridge_origin_v1 {
     TINYARCADE_ORIGIN_PRIVATE_USER = 2
 } tinyarcade_cartridge_origin_v1;
 
+/* Render/audio/state byte ceilings preserve zero exactly. Zero rejects a
+ * non-empty submission; max_state_bytes=0 still permits an explicitly saved
+ * and restored empty guest state. It never means unlimited or use-default. */
 typedef struct tinyarcade_config_v1 {
     uint32_t struct_size;
     uint32_t max_table_elems;

@@ -80,6 +80,7 @@ tinyvm iOS game runtime
 │   │   └── header-only core v1 declarations [x]
 │   │       └── indexed2d metadata extension [x]
 │   ├── app-build host profile        [x]
+│   │   └── exact zero-budget channel semantics [x]
 │   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
 ├── iOS native bridge                 [~]
@@ -4212,3 +4213,28 @@ Clippy, rustfmt, ShellCheck and the executable PRD map pass; the map now binds
 Depth Well tests, five Signal Lock tests, one UI journey and an unsigned arm64
 device Release build. Physical-device and TestFlight evidence remain open, so
 the persistent goal stays active.
+
+## One-hundred-thirty-fifth executable increment — exact zero-budget channels
+
+The runtime configuration and canonical TAH1 app-build profile now share one
+exact meaning for zero render, audio and state ceilings. Zero is a finite
+capability restriction—never “unlimited” or “replace with defaults.” Non-empty
+render/audio/state submissions trap through their existing budget paths, while
+a deliberately stateless cartridge may submit, snapshot and restore exactly
+zero guest-state bytes. The public Rust fields, C header, Swift package and
+schema-3 profile contract all publish that same rule.
+
+Evidence on 2026-08-22: a Rust black box round-trips a TAH1 profile with all
+three game channels set to zero, independently proves non-empty render, audio
+and state rejection, then suspends and resumes an explicit empty state. The C
+profile test exports and decodes `max_audio_bytes=0`; the linked Swift smoke
+generates that same App-build profile, checks the canonical field bytes remain
+zero and statically accepts the matching native-import cartridge without
+calling app code. Default iOS consumers link at 1,767,864 bytes arm64 and
+1,853,920 bytes x86_64; opt-in SIMD links at 1,768,792 / 1,857,944 bytes,
+inside the existing ceilings. The complete all-feature suite, JSC/H5
+differential, warnings-denied Clippy, rustfmt and the 136-leaf executable PRD
+map pass. The real App consumes the exact archive and passes eight Depth Well
+tests, five Signal Lock tests, one UI journey and an unsigned arm64 device
+Release build. Physical-device and TestFlight evidence remain open, so the
+persistent goal stays active.
