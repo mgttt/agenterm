@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import Foundation
 @preconcurrency import GameController
 import UIKit
@@ -41,6 +42,20 @@ private final class TinyArcadeFixtureConcurrency: @unchecked Sendable {
         let value = active
         lock.unlock()
         return value
+    }
+}
+
+private struct TinyArcadeHeapSnapshot {
+    let bytesInUse: Int
+    let blocksInUse: Int
+
+    static func capture() -> Self {
+        var statistics = malloc_statistics_t()
+        malloc_zone_statistics(malloc_default_zone(), &statistics)
+        return Self(
+            bytesInUse: Int(statistics.size_in_use),
+            blocksInUse: Int(statistics.blocks_in_use)
+        )
     }
 }
 
@@ -1195,6 +1210,49 @@ struct TinyArcadeSmoke {
                     format: "600 frames avg=%.3fms p95=%.3fms max=%.3fms fuel=%llu pages=%u",
                     paddleAverage, paddleP95, paddleMaximum, paddleMaxSteps, paddleMaxPages
                 )
+        )
+        _ = TinyArcadeHeapSnapshot.capture()
+        for index in 601...1_800 {
+            try autoreleasepool {
+                let buttons: UInt32 = (index / 90).isMultiple(of: 2) ? 1 << 0 : 1 << 1
+                paddleFrame = try paddleRuntime.tickMedia(
+                    buttons: buttons,
+                    clockMilliseconds: UInt32(index * 16)
+                )
+                guard case let .indexed2D(decoded) = paddleFrame.renderFrame else {
+                    preconditionFailure("Paddle Guard changed render protocol")
+                }
+                try paddleView.display(decoded)
+            }
+        }
+        let heapBaseline = TinyArcadeHeapSnapshot.capture()
+        for index in 1_801...4_200 {
+            try autoreleasepool {
+                let buttons: UInt32 = (index / 90).isMultiple(of: 2) ? 1 << 0 : 1 << 1
+                paddleFrame = try paddleRuntime.tickMedia(
+                    buttons: buttons,
+                    clockMilliseconds: UInt32(index * 16)
+                )
+                guard case let .indexed2D(decoded) = paddleFrame.renderFrame else {
+                    preconditionFailure("Paddle Guard changed render protocol")
+                }
+                try paddleView.display(decoded)
+            }
+        }
+        let heapFinal = TinyArcadeHeapSnapshot.capture()
+        let heapByteGrowth = max(0, heapFinal.bytesInUse - heapBaseline.bytesInUse)
+        let heapBlockGrowth = max(0, heapFinal.blocksInUse - heapBaseline.blocksInUse)
+        precondition(
+            heapByteGrowth <= 1_048_576,
+            "Paddle Guard steady frame loop retained more than 1 MiB of heap"
+        )
+        precondition(
+            heapBlockGrowth <= 2_048,
+            "Paddle Guard steady frame loop retained more than 2,048 heap blocks"
+        )
+        print(
+            "OK: Paddle Guard 2,400-frame steady heap growth "
+                + "bytes=\(heapByteGrowth) blocks=\(heapBlockGrowth)"
         )
         try paddleRuntime.close()
     }

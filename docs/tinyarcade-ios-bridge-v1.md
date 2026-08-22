@@ -519,17 +519,26 @@ rejected direct host input leaves the runtime playable.
 The performance pass reads telemetry after every measured frame and requires it
 to agree with the copied media lengths and configured fuel/page ceilings. In
 the current release build, Depth Well's 600-frame run peaks at 13,150 Wasm
-steps and 17 pages; Paddle Guard peaks at 37,864 steps and 17 pages. Their p95
-values are 0.105 ms and 0.257 ms respectively on the iPhone 17 Pro simulator.
-These numbers are regression evidence for this build and host, not a claim
-about physical-device latency.
+steps and 17 pages; Paddle Guard peaks at 37,864 steps and 17 pages. Across two
+independent iPhone 17 Pro simulator runs, Depth Well p95 was 0.128–0.171 ms and
+Paddle Guard p95 was 0.230–0.247 ms. These numbers are regression evidence for
+this build and host, not a claim about physical-device latency.
+
+The same booted-simulator owner now measures the native heap after the ordinary
+Paddle Guard performance path. It performs another 1,200-frame warm-up, then
+drives 2,400 frames through `tickMedia`, indexed2d decoding and UIKit display,
+with a per-frame autorelease pool. `malloc_default_zone` reported zero positive
+growth in both active bytes and blocks in two independent runs; hard gates
+allow at most 1 MiB and 2,048 blocks to absorb simulator-framework noise while
+still rejecting frame-proportional retention. This is active native-heap
+evidence, not allocation-event counts or physical-device footprint evidence.
 
 The adjacent Nostalgia Arcade consumer also owns an app-target 600-frame gate.
 It measures wall time around the real `BundledDepthWellCartridgeRuntime.tick`,
 reads v2 execution telemetry after every frame, enforces an 8 ms p95 host
 budget plus fuel/page ceilings, and retains the exact result as an `.xcresult`
 attachment. `scripts/test-tinyarcade-on-device.sh` in that repository selects
-a connected physical iPhone (or accepts `TINYARCADE_DEVICE_ID`), runs all 11
+a connected physical iPhone (or accepts `TINYARCADE_DEVICE_ID`), runs all 13
 App runtime tests and the playable UI journey on it, performs the unsigned
 arm64 product build, and exports the performance attachment into a timestamped
 evidence directory. The same test currently records 0.207 ms p95, 23,203 peak
@@ -545,7 +554,7 @@ contains the ABI v1.10 completion-channel symbol while consuming the current
 v1.13 archive, and rejects any implicit
 rewrite of the committed cartridges or Xcode project. Evidence on 2026-08-22
 has archive SHA-256
-`28b510624c430f1c4ce337b8bcb10796c6b1fac3f9e8d1dc75985143d576be7e`;
+`582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`;
 the App contains only the 6,116-byte Depth Well and 6,040-byte Signal Lock
 cartridges, with no WebKit/JavaScriptCore, URLSession, external-library surface
 or archived native game engine. A counted App-target test now takes a tone from

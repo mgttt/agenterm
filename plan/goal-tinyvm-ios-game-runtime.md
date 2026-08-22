@@ -4791,3 +4791,29 @@ Nostalgia Arcade target passes 13 cartridge unit tests, its two-game UI journey
 and an arm64 device Release build with the byte-identical ABI v1.13 archive.
 Physical-iPhone lifecycle/performance/audio and TestFlight install/play evidence
 remain open, so the persistent goal stays active.
+
+## One-hundred-fifty-fifth executable increment — steady-state simulator heap gate
+
+The booted iOS Simulator owner now checks active native-heap stability across
+the complete ordinary frame path instead of treating latency and VM telemetry
+as sufficient memory evidence. After the existing Paddle Guard performance
+run, it warms `tickMedia`, indexed2d decoding and UIKit presentation for another
+1,200 frames, captures `malloc_default_zone`, then measures 2,400 more frames
+with a per-frame autorelease pool. Two independent default-framework runs both
+reported exactly zero positive growth in active bytes and active blocks.
+
+The executable gate permits at most 1 MiB and 2,048 active blocks so unrelated
+simulator-framework noise does not create a flaky pass/fail boundary, while
+still rejecting frame-proportional retention. This is evidence about the
+simulator process's active malloc heap, not allocation-event counts or a claim
+about physical-device footprint. Default consumers link at 1,796,760 bytes
+arm64 and 1,906,600 bytes x86_64; the opt-in SIMD pair links at 1,815,480 /
+1,919,176 bytes. All remain inside unchanged finite ceilings. The complete
+all-feature suite, warnings-denied Clippy, rustfmt, shell checks, documentation
+redaction, full WABT/JavaScriptCore/H5 standard-feature matrix and independently
+booted default/SIMD smoke owners pass. The real Nostalgia Arcade consumer also
+passes 13 cartridge unit tests, its two-game UI journey and an arm64 device
+Release build while consuming the byte-identical ABI v1.13 archive (SHA-256
+`582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`).
+Physical-iPhone lifecycle, memory, performance and audio plus TestFlight
+install/play evidence remain open, so the persistent goal stays active.
