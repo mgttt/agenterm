@@ -37,20 +37,40 @@ fn facts(repo_value, profile) {
 
     let stdout_path = repo + ".build-identity.stdout.tmp";
 
-    let prefix_code = { let c = std::process::command("git"); c.args(["-C", repo, "rev-parse", "--show-prefix"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
+    let prefix_command = std::process::command("git");
+    prefix_command.args(["-C", repo, "rev-parse", "--show-prefix"]);
+    prefix_command.timeout(10000);
+    prefix_command.stdout_file(stdout_path);
+    let prefix_code = prefix_command.output().exit_code;
     require(prefix_code == 0, "build-identity-git-root");
     let prefix = std::fs::read_to_string(stdout_path);
     let prefix = prefix.trim();
     require(prefix == "", "build_identity_repo_not_exact_git_root:" + repo);
 
-    let commit_code = { let c = std::process::command("git"); c.args(["-C", repo, "rev-parse", "--verify", "HEAD"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
+    let commit_code_command = std::process::command("git");
+
+    commit_code_command.args(["-C", repo, "rev-parse", "--verify", "HEAD"]);
+
+    commit_code_command.timeout(10000);
+
+    commit_code_command.stdout_file(stdout_path);
+
+    let commit_code = commit_code_command.output().exit_code;
     require(commit_code == 0, "build-identity-git-commit");
     let commit = std::fs::read_to_string(stdout_path);
     let commit = commit.trim();
     let commit = commit.to_lower();
     require(is_git_commit(commit), "build_identity_git_commit_invalid");
 
-    let status_code = { let c = std::process::command("git"); c.args(["-C", repo, "status", "--porcelain=v1", "--untracked-files=normal"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
+    let status_code_command = std::process::command("git");
+
+    status_code_command.args(["-C", repo, "status", "--porcelain=v1", "--untracked-files=normal"]);
+
+    status_code_command.timeout(10000);
+
+    status_code_command.stdout_file(stdout_path);
+
+    let status_code = status_code_command.output().exit_code;
     require(status_code == 0, "build-identity-git-status");
     let status = std::fs::read_to_string(stdout_path);
     let status = status.trim();

@@ -28,11 +28,17 @@ fn entry() {
         sample_tag += sample;
 
         if sample == 1 || cache != "target" {
-            let clean_code = { let c = std::process::command("cargo"); c.args(["clean"]); c.timeout(300000); c.output().exit_code };
+            let clean_code_command = std::process::command("cargo");
+            clean_code_command.args(["clean"]);
+            clean_code_command.timeout(300000);
+            let clean_code = clean_code_command.output().exit_code;
             require(clean_code == 0, "performance_samples_clean:" + sample_tag);
         }
         if cache == "sccache" {
-            let reset_code = { let c = std::process::command("sccache"); c.args(["--zero-stats"]); c.timeout(30000); c.output().exit_code };
+            let reset_code_command = std::process::command("sccache");
+            reset_code_command.args(["--zero-stats"]);
+            reset_code_command.timeout(30000);
+            let reset_code = reset_code_command.output().exit_code;
             require(
                 reset_code == 0,
                 "performance_samples_sccache_reset:" + sample_tag
@@ -43,7 +49,10 @@ fn entry() {
         let timing = std::path::join(evidence, timing_name).display;
         let quick_cmdline =
             "check.cmd --quick --timing \"" + timing + "\"";
-        let quick_code = { let c = std::process::command("cmd.exe"); c.args(["/d", "/s", "/c", quick_cmdline]); c.timeout(900000); c.output().exit_code };
+        let quick_code_command = std::process::command("cmd.exe");
+        quick_code_command.args(["/d", "/s", "/c", quick_cmdline]);
+        quick_code_command.timeout(900000);
+        let quick_code = quick_code_command.output().exit_code;
         require(quick_code == 0, "performance_samples_quick:" + sample_tag);
 
         if cache == "sccache" {
@@ -51,7 +60,11 @@ fn entry() {
             let stderr_name = "sccache-" + sample_tag + ".stderr";
             let stats_path = std::path::absolute(stats_name).display;
             let stderr_path = std::path::absolute(stderr_name).display;
-            let stats_code = { let c = std::process::command("sccache"); c.args(["--show-stats", "--stats-format", "json"]); c.timeout(30000); c.stdout_file(stats_path); c.output().exit_code };
+            let stats_code_command = std::process::command("sccache");
+            stats_code_command.args(["--show-stats", "--stats-format", "json"]);
+            stats_code_command.timeout(30000);
+            stats_code_command.stdout_file(stats_path);
+            let stats_code = stats_code_command.output().exit_code;
             if std::fs::exists(stderr_path) {
                 let stderr = std::fs::read_to_string(stderr_path);
                 if stderr != "" {

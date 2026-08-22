@@ -18,14 +18,20 @@ fn entry() {
         return 0;
     }
 
-    let tag_status = { let c = std::process::command("git"); c.args([
+    let tag_status_command = std::process::command("git");
+
+    tag_status_command.args([
             "-C",
             repo,
             "show-ref",
             "--verify",
             "--quiet",
             "refs/tags/v0.1.7"
-        ]); c.timeout(2000); c.output().exit_code };
+        ]);
+
+    tag_status_command.timeout(2000);
+
+    let tag_status = tag_status_command.output().exit_code;
     if tag_status == 0 {
         return rh::fail("Internal-only v0.1.7 must not have a local Git tag.");
     }

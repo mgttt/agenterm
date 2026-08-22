@@ -16,14 +16,21 @@ fn entry() {
     }
 
     let repo = std::path::absolute(args[0]).display;
-    let toplevel = { let c = std::process::command("git"); c.args(["-C", repo, "rev-parse", "--show-toplevel"]); c.timeout(10000); c.output().exit_code };
+    let toplevel_command = std::process::command("git");
+    toplevel_command.args(["-C", repo, "rev-parse", "--show-toplevel"]);
+    toplevel_command.timeout(10000);
+    let toplevel = toplevel_command.output().exit_code;
     require(toplevel == 0, "target-clean-git-root");
 
     // Git resolves Windows 8.3 aliases to a long path for --show-toplevel.
     // Comparing those spellings would reject the same directory on hosted runners.
     // An empty Git-relative prefix proves that -C itself names the repository root.
     let stdout_path = repo + ".prepare-target-clean.stdout.tmp";
-    let prefix_code = { let c = std::process::command("git"); c.args(["-C", repo, "rev-parse", "--show-prefix"]); c.timeout(10000); c.stdout_file(stdout_path); c.output().exit_code };
+    let prefix_code_command = std::process::command("git");
+    prefix_code_command.args(["-C", repo, "rev-parse", "--show-prefix"]);
+    prefix_code_command.timeout(10000);
+    prefix_code_command.stdout_file(stdout_path);
+    let prefix_code = prefix_code_command.output().exit_code;
     require(prefix_code == 0, "target-clean-git-prefix");
     let prefix = std::fs::read_to_string(stdout_path);
     let prefix = prefix.trim();

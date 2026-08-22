@@ -22,9 +22,19 @@ fn entry() {
 
     let stdout_path = research + ".agenterm-net-research.stdout.tmp";
 
-    let clippy_code = { let c = std::process::command("cargo"); c.args(["clippy", "--locked", "--all-targets", "--", "-D", "warnings"]); c.timeout(300000);
-      c.stdout_file(stdout_path); c.current_dir(research); c.env("CARGO_TERM_COLOR", "never");
-      c.output().exit_code };
+    let clippy_code_command = std::process::command("cargo");
+
+    clippy_code_command.args(["clippy", "--locked", "--all-targets", "--", "-D", "warnings"]);
+
+    clippy_code_command.timeout(300000);
+
+    clippy_code_command.stdout_file(stdout_path);
+
+    clippy_code_command.current_dir(research);
+
+    clippy_code_command.env("CARGO_TERM_COLOR", "never");
+
+    let clippy_code = clippy_code_command.output().exit_code;
     if clippy_code != 0 {
         let output = std::fs::read_to_string(stdout_path);
         print(output);
@@ -33,9 +43,19 @@ fn entry() {
     }
     std::fs::try_remove_file(stdout_path);
 
-    let test_code = { let c = std::process::command("cargo"); c.args(["test", "--locked", "--quiet"]); c.timeout(300000);
-      c.stdout_file(stdout_path); c.current_dir(research); c.env("CARGO_TERM_COLOR", "never");
-      c.output().exit_code };
+    let test_code_command = std::process::command("cargo");
+
+    test_code_command.args(["test", "--locked", "--quiet"]);
+
+    test_code_command.timeout(300000);
+
+    test_code_command.stdout_file(stdout_path);
+
+    test_code_command.current_dir(research);
+
+    test_code_command.env("CARGO_TERM_COLOR", "never");
+
+    let test_code = test_code_command.output().exit_code;
     if test_code != 0 {
         let output = std::fs::read_to_string(stdout_path);
         print(output);
@@ -44,9 +64,19 @@ fn entry() {
     }
     std::fs::try_remove_file(stdout_path);
 
-    let self_test_code = { let c = std::process::command("cargo"); c.args(["run", "--locked", "--quiet", "--", "self-test", "--json"]); c.timeout(120000);
-      c.stdout_file(stdout_path); c.current_dir(research); c.env("CARGO_TERM_COLOR", "never");
-      c.output().exit_code };
+    let self_test_code_command = std::process::command("cargo");
+
+    self_test_code_command.args(["run", "--locked", "--quiet", "--", "self-test", "--json"]);
+
+    self_test_code_command.timeout(120000);
+
+    self_test_code_command.stdout_file(stdout_path);
+
+    self_test_code_command.current_dir(research);
+
+    self_test_code_command.env("CARGO_TERM_COLOR", "never");
+
+    let self_test_code = self_test_code_command.output().exit_code;
     if self_test_code != 0 {
         let output = std::fs::read_to_string(stdout_path);
         print(output);

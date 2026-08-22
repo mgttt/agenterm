@@ -5604,6 +5604,56 @@ fn emit_local_command_receiver_method(
     Ok(true)
 }
 
+/// `command.output().exit_code` -- a property read straight off the output,
+/// without binding it first.
+///
+/// `output_property_binding` wants the left side to be a variable already
+/// holding an output, so the chained form had no lowering and fell through to
+/// the generic path, which refuses it. The builder methods it follows were
+/// all supported, which made the refusal read as though the builder was the
+/// problem.
+fn local_command_output_property<'a>(expr: &'a Expr, ctx: &EmitCtx) -> Option<(&'a str, &'a str)> {
+    let Expr::Dot(boxed, ..) = expr else {
+        return None;
+    };
+    let Expr::Variable(ident, ..) = &boxed.lhs else {
+        return None;
+    };
+    if ctx.scope.get(ident.1.as_str()).copied() != Some(ValueKind::Command) {
+        return None;
+    }
+    let Expr::Dot(inner, ..) = &boxed.rhs else {
+        return None;
+    };
+    let Expr::MethodCall(call, ..) = &inner.lhs else {
+        return None;
+    };
+    if call.name != "output" || !call.args.is_empty() {
+        return None;
+    }
+    let property = dot_property_name(&inner.rhs)?;
+    matches!(
+        property,
+        "success" | "exit_code" | "stdout" | "stderr" | "truncated" | "complete"
+    )
+    .then_some((ident.1.as_str(), property))
+}
+
+fn emit_local_command_output_property(
+    out: &mut String,
+    expr: &Expr,
+    ctx: &mut EmitCtx,
+) -> Result<bool, RhError> {
+    let Some((binding, property)) = local_command_output_property(expr, ctx) else {
+        return Ok(false);
+    };
+    out.push_str("rh_command_output(&mut ");
+    out.push_str(binding);
+    out.push_str(").");
+    out.push_str(property);
+    Ok(true)
+}
+
 fn emit_output_method(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<bool, RhError> {
     let Some((binding, call)) = output_method_call(expr, ctx) else {
         return Ok(false);
@@ -8767,6 +8817,9 @@ fn emit_expr(out: &mut String, expr: &Expr, ctx: &mut EmitCtx) -> Result<(), RhE
             return Ok(());
         }
         if emit_local_command_receiver_method(out, expr, ctx)? {
+            return Ok(());
+        }
+        if emit_local_command_output_property(out, expr, ctx)? {
             return Ok(());
         }
         if emit_command_method(out, expr, ctx)? {
