@@ -870,18 +870,38 @@ con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序
   差的 7 个是 dumpbin 摘要区的节名,不是漏解析);脚本内置探针自检(不存在的导出必须解析失败、
   通用导出必须解析成功),否则"全部通过"就可能是探针坏了而不是系统没问题。
 
+  **已在真实 Server 2016 验证(2026-08-22,用户目标机 10.0.14393)**:
+  `probe-imports.ps1` 报 201 个导入全部可解析;`agenterm-con.exe` **正常启动**,
+  并给出按设计措辞的可操作错误(指名版本而非符号)。加载期问题全部关闭。
+  `VCRUNTIME140.dll` 已通过静态链接 VC 运行时消除(见 commit 471df568),
+  关键是 `/ENTRY` 下必须自己调 `__vcrt_initialize`;**`__security_init_cookie` 经负对照
+  证明不需要加**(`.CRT$XI*` 里已有)。可加载性门的例外清单现已清空。
+
+- [ ] **CON-oldpty 旧 Windows 的 PTY 后端**（2026-08-22 开）— 加载好了,但 Server 2016
+  没有 ConPTY,终端开不出标签页。方向已定:**按能力自适应选择后端**。
+  - **微软 ConPTY 重发行包救不了**:`Microsoft.Windows.Console.ConPTY`(wezterm 打包的
+    `conpty.dll` + `OpenConsole.exe`)官方写明支持 `10.0.17763.0 及以上`——与内置 API 同一
+    下限。**已排除,不要再查**。
+  - 唯一可行路线是 winpty 那套:agent 进程持有一个**隐藏控制台**,子进程画进去,
+    用 `ReadConsoleOutputW` 轮询刮缓冲区。所用 API 全部是 NT 时代的。
+  - **机制已用 spike 实测通过**(本机单进程):`FreeConsole` → `AllocConsole` →
+    隐藏控制台窗口 → 打开 `CONOUT$`/`CONIN$` → 子进程挂上去 → `ReadConsoleOutputW`
+    刮回子进程画的内容。三个已踩过的坑记在 `skills/windows-binary-portability` §3b:
+    重定向 stdio 下 `GetStdHandle` 拿到的是管道不是新控制台;`CreateFileW` 的句柄默认不可继承,
+    不给 `SECURITY_ATTRIBUTES` + `STARTF_USESTDHANDLES` 子进程就画不到任何地方;
+    宽字符占两个 `CHAR_INFO` 格且两格同码位,要靠 `COMMON_LVB_LEADING_BYTE`/`TRAILING_BYTE` 区分。
+  - **设计约束**:
+    - 按**能力**选后端(复用 `conpty::is_available()` 的 `GetProcAddress` 解析),不按版本号比较——
+      版本号只用于**措辞**,解析才用于**决策**。
+    - agent 就是 `agenterm-con` 自身 re-exec(`--console-agent`),不引入第三方二进制,
+      符合"不依赖非原生东西"的方向。
+    - **后端差异必须封死在 `PtySession` 字节流契约之下**:agent 负责把缓冲区差异合成 VT,
+      adapter 之上的任何代码都不应知道跑的是哪个后端。
+  - **未做**:实现本身。这是一个真实子系统(winpty 本体约 10k 行 C++;我们因为两端自控可以小得多,
+    但仍是 ~1k 行量级 + 测试),不是一次改动能收口的。
   **仍未关**:
-  - 未在真实 Server 2016 上跑过 `probe-imports.ps1`;第三个阻断符号存在与否未知。
-    本机(Server 2022 / 10.0.20348)对当前产物报全通过,这只排除了本机。
-  - `VCRUNTIME140.dll` 仍是动态依赖(`mem*` 四个 + `__CxxFrameHandler3` / `_CxxThrowException`),
-    干净的 Server 2016 不自带,需装 VC++ 运行库。已在门里记为 `KNOWN_NON_OS_MODULES`,
-    保证它可见、且不能被用来放行新的非 OS 依赖。
-    改静态不是加个 flag:con 自带 PE 入口(`startup.rs`)不跑静态 CRT 的
-    `__security_init_cookie` / `__vcrt_initialize`,`static=libvcruntime` 能链但首个测试即
-    `STATUS_STACK_BUFFER_OVERRUN`(已实测,基线同命令 125 全绿,归属确定)。
-    要么让 `startup.rs` 接管这两个初始化,要么把 DLL 随产物分发——属交付链决策,未擅自定。
-  - 未在真实 Server 2016 上验证过。以上是导入表推导 + 本机等价验证,不是目标机实测。
-  - 同一缺陷也存在于 `agenterm.exe`(共用该 adapter,已随之修复),但它没有对应的加载性门。
+  - `agenterm.exe` 共用该 adapter,ConPTY 修复随之生效,但它没有对应的加载性门,
+    也没有静态 CRT 改动(`build.rs` 是 con 独有的)。
 
 ### 轨 C Gate
 

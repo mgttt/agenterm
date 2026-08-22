@@ -107,6 +107,54 @@ module that is neither an OS component nor a recorded exception. Its weakness
 is that its blocker list is hand-written — it refuses only what someone already
 thought of. It is a supplement to §1, not a replacement.
 
+## 3b. Loading is not running: ConPTY has no fallback to resolve to
+
+Late resolution (§3) fixes *starting*. It does not conjure the feature. Once
+`agenterm-con.exe` loaded on Server 2016 it reported, correctly and by design:
+
+```
+PTY spawn failed (pty_spawn_failed): this Windows build does not export
+ConPTY; a pseudoconsole needs Windows 10 build 17763 (1809) or newer
+```
+
+For a terminal that is still "does not work". Options, researched:
+
+- **Microsoft's ConPTY redistributable** (`Microsoft.Windows.Console.ConPTY`
+  NuGet: `conpty.dll` + `OpenConsole.exe`, what wezterm bundles). **Does not
+  help.** The package states it works on *10.0.17763.0 and above* — the same
+  floor as the in-box API. Ruled out; do not re-investigate.
+- **The winpty mechanism** — an agent process owning a *hidden* console, the
+  child spawned into it, and the screen buffer polled with
+  `ReadConsoleOutputW`. This is how every terminal worked before 1809 and it
+  runs from Windows XP up.
+
+**Mechanism verified locally** (spike, single process): `FreeConsole` →
+`AllocConsole` → `ShowWindow(GetConsoleWindow(), SW_HIDE)` → open the console
+→ spawn a child onto it → `GetConsoleScreenBufferInfo` +
+`ReadConsoleOutputW` returns exactly what the child painted. Two traps cost a
+cycle each and will cost yours too:
+
+1. **`GetStdHandle` is the wrong way to reach the new console.** A process
+   started with redirected stdio still gets the *pipe* back after
+   `AllocConsole`. Open `CONOUT$` / `CONIN$` with `CreateFileW` instead.
+2. **Those handles are not inheritable by default.** Without
+   `SECURITY_ATTRIBUTES { bInheritHandle: TRUE }` and `STARTF_USESTDHANDLES`,
+   the child paints nowhere and the scrape comes back blank.
+
+Third trap, visible in the spike's output as `版版本本`: a double-width
+character occupies **two** `CHAR_INFO` cells, each carrying the same code
+unit. Use the `COMMON_LVB_LEADING_BYTE` / `COMMON_LVB_TRAILING_BYTE` attribute
+bits to tell them apart, or every CJK glyph doubles.
+
+**Select by capability, not by version number.** `conpty::is_available()`
+already answers "can this system host a pseudoconsole" by resolving the
+exports; a build-number comparison would also have to be revisited if a
+redistributable ever lowers the floor. The version is for the *message*; the
+resolution is for the *decision*.
+
+Keep the fallback behind the existing `PtySession` byte-stream contract: the
+agent synthesizes VT so nothing above the adapter learns which backend ran.
+
 ## 4. UCRT is Windows; VCRUNTIME140 is not
 
 Sort the CRT dependencies before deciding anything:
