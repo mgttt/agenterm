@@ -3,7 +3,7 @@
 // Args: REPO PREFIX ARTIFACTS [LIBDIR INCLUDEDIR BINDIR]
 
 fn require(condition, message) {
-    if condition == 0 {
+    if !condition {
         throw message;
     }
     0
