@@ -3251,7 +3251,7 @@ public final class TinyArcadeSnapshotStoreV1 {
             ".\(gameID).snapshot-v1.prepared",
             isDirectory: false
         )
-        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+        defer { try? removePreparedFileIfPresent(temporaryURL) }
         do {
             try removePreparedFileIfPresent(temporaryURL)
             try data.write(to: temporaryURL, options: .withoutOverwriting)
@@ -3699,6 +3699,15 @@ public final class TinyArcadeAppleInputV1: NSObject {
         controller.extendedGamepad?.valueChangedHandler = nil
         sourceHandler(binding.source, [])
     }
+
+    #if TINYARCADE_TEST_HOOKS
+    /// Samples one attached synthetic controller through the production
+    /// publication path. Some SDKs do not emit callbacks for test controllers.
+    func refresh(_ controller: GCController) {
+        guard let gamepad = controller.extendedGamepad else { return }
+        publish(controller: controller, buttons: Self.buttons(for: gamepad))
+    }
+    #endif
 
     private func publish(controller: GCController, buttons: TinyArcadeButtonsV1) {
         guard isActive,

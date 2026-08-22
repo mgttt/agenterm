@@ -1538,8 +1538,7 @@ enum Op {
     F32Copysign,
     F32Load(MemArg),
     F32Store(MemArg),
-    /// Initial game-oriented SIMD subset: full-width memory traffic plus
-    /// signed saturating PCM-lane addition and subtraction.
+    /// Bounded game-kernel SIMD subset with portable scalar execution.
     #[cfg(feature = "simd")]
     V128Load(MemArg),
     #[cfg(feature = "simd")]
@@ -1560,6 +1559,46 @@ enum Op {
     V128Bitselect,
     #[cfg(feature = "simd")]
     V128AnyTrue,
+    #[cfg(feature = "simd")]
+    I8x16Splat,
+    #[cfg(feature = "simd")]
+    I16x8Splat,
+    #[cfg(feature = "simd")]
+    I32x4Splat,
+    #[cfg(feature = "simd")]
+    I64x2Splat,
+    #[cfg(feature = "simd")]
+    F32x4Splat,
+    #[cfg(feature = "simd")]
+    F64x2Splat,
+    #[cfg(feature = "simd")]
+    I8x16ExtractLaneS(u8),
+    #[cfg(feature = "simd")]
+    I8x16ExtractLaneU(u8),
+    #[cfg(feature = "simd")]
+    I8x16ReplaceLane(u8),
+    #[cfg(feature = "simd")]
+    I16x8ExtractLaneS(u8),
+    #[cfg(feature = "simd")]
+    I16x8ExtractLaneU(u8),
+    #[cfg(feature = "simd")]
+    I16x8ReplaceLane(u8),
+    #[cfg(feature = "simd")]
+    I32x4ExtractLane(u8),
+    #[cfg(feature = "simd")]
+    I32x4ReplaceLane(u8),
+    #[cfg(feature = "simd")]
+    I64x2ExtractLane(u8),
+    #[cfg(feature = "simd")]
+    I64x2ReplaceLane(u8),
+    #[cfg(feature = "simd")]
+    F32x4ExtractLane(u8),
+    #[cfg(feature = "simd")]
+    F32x4ReplaceLane(u8),
+    #[cfg(feature = "simd")]
+    F64x2ExtractLane(u8),
+    #[cfg(feature = "simd")]
+    F64x2ReplaceLane(u8),
     #[cfg(feature = "simd")]
     I8x16Add,
     #[cfg(feature = "simd")]
@@ -2033,6 +2072,82 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                             i = end;
                             ops.push(Op::V128Const(value));
                         }
+                        15 => ops.push(Op::I8x16Splat),
+                        16 => ops.push(Op::I16x8Splat),
+                        17 => ops.push(Op::I32x4Splat),
+                        18 => ops.push(Op::I64x2Splat),
+                        19 => ops.push(Op::F32x4Splat),
+                        20 => ops.push(Op::F64x2Splat),
+                        21 => {
+                            let (lane, ni) = simd_lane(body, i, 16)?;
+                            i = ni;
+                            ops.push(Op::I8x16ExtractLaneS(lane));
+                        }
+                        22 => {
+                            let (lane, ni) = simd_lane(body, i, 16)?;
+                            i = ni;
+                            ops.push(Op::I8x16ExtractLaneU(lane));
+                        }
+                        23 => {
+                            let (lane, ni) = simd_lane(body, i, 16)?;
+                            i = ni;
+                            ops.push(Op::I8x16ReplaceLane(lane));
+                        }
+                        24 => {
+                            let (lane, ni) = simd_lane(body, i, 8)?;
+                            i = ni;
+                            ops.push(Op::I16x8ExtractLaneS(lane));
+                        }
+                        25 => {
+                            let (lane, ni) = simd_lane(body, i, 8)?;
+                            i = ni;
+                            ops.push(Op::I16x8ExtractLaneU(lane));
+                        }
+                        26 => {
+                            let (lane, ni) = simd_lane(body, i, 8)?;
+                            i = ni;
+                            ops.push(Op::I16x8ReplaceLane(lane));
+                        }
+                        27 => {
+                            let (lane, ni) = simd_lane(body, i, 4)?;
+                            i = ni;
+                            ops.push(Op::I32x4ExtractLane(lane));
+                        }
+                        28 => {
+                            let (lane, ni) = simd_lane(body, i, 4)?;
+                            i = ni;
+                            ops.push(Op::I32x4ReplaceLane(lane));
+                        }
+                        29 => {
+                            let (lane, ni) = simd_lane(body, i, 2)?;
+                            i = ni;
+                            ops.push(Op::I64x2ExtractLane(lane));
+                        }
+                        30 => {
+                            let (lane, ni) = simd_lane(body, i, 2)?;
+                            i = ni;
+                            ops.push(Op::I64x2ReplaceLane(lane));
+                        }
+                        31 => {
+                            let (lane, ni) = simd_lane(body, i, 4)?;
+                            i = ni;
+                            ops.push(Op::F32x4ExtractLane(lane));
+                        }
+                        32 => {
+                            let (lane, ni) = simd_lane(body, i, 4)?;
+                            i = ni;
+                            ops.push(Op::F32x4ReplaceLane(lane));
+                        }
+                        33 => {
+                            let (lane, ni) = simd_lane(body, i, 2)?;
+                            i = ni;
+                            ops.push(Op::F64x2ExtractLane(lane));
+                        }
+                        34 => {
+                            let (lane, ni) = simd_lane(body, i, 2)?;
+                            i = ni;
+                            ops.push(Op::F64x2ReplaceLane(lane));
+                        }
                         77 => ops.push(Op::V128Not),
                         78 => ops.push(Op::V128And),
                         79 => ops.push(Op::V128AndNot),
@@ -2465,6 +2580,17 @@ fn le4(s: &[u8]) -> [u8; 4] {
 /// The 8-byte counterpart of [`le4`].
 fn le8(s: &[u8]) -> [u8; 8] {
     [s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7]]
+}
+
+#[cfg(feature = "simd")]
+fn simd_lane(bytes: &[u8], i: usize, lane_count: u8) -> Result<(u8, usize), WasmError> {
+    let lane = *bytes
+        .get(i)
+        .ok_or(WasmError::Decode("truncated SIMD lane immediate"))?;
+    if lane >= lane_count {
+        return Err(WasmError::Decode("SIMD lane index out of range"));
+    }
+    Ok((lane, i + 1))
 }
 
 /// Read `n` value-type bytes, bounds-checked, returning them and the next
@@ -4887,6 +5013,26 @@ impl Module {
                     | Op::V128Xor
                     | Op::V128Bitselect
                     | Op::V128AnyTrue
+                    | Op::I8x16Splat
+                    | Op::I16x8Splat
+                    | Op::I32x4Splat
+                    | Op::I64x2Splat
+                    | Op::F32x4Splat
+                    | Op::F64x2Splat
+                    | Op::I8x16ExtractLaneS(_)
+                    | Op::I8x16ExtractLaneU(_)
+                    | Op::I8x16ReplaceLane(_)
+                    | Op::I16x8ExtractLaneS(_)
+                    | Op::I16x8ExtractLaneU(_)
+                    | Op::I16x8ReplaceLane(_)
+                    | Op::I32x4ExtractLane(_)
+                    | Op::I32x4ReplaceLane(_)
+                    | Op::I64x2ExtractLane(_)
+                    | Op::I64x2ReplaceLane(_)
+                    | Op::F32x4ExtractLane(_)
+                    | Op::F32x4ReplaceLane(_)
+                    | Op::F64x2ExtractLane(_)
+                    | Op::F64x2ReplaceLane(_)
                     | Op::I8x16Add
                     | Op::I8x16Sub
                     | Op::I16x8Add
@@ -6807,6 +6953,133 @@ impl Module {
                 Op::V128AnyTrue => {
                     let value = pop_v128(&mut stack)?;
                     stack.push(Val::I32(value.iter().any(|&byte| byte != 0) as i32));
+                }
+                #[cfg(feature = "simd")]
+                Op::I8x16Splat => {
+                    let lane = pop(&mut stack)? as u8;
+                    stack.push(Val::V128([lane; 16]));
+                }
+                #[cfg(feature = "simd")]
+                Op::I16x8Splat => {
+                    let lane = (pop(&mut stack)? as i16).to_le_bytes();
+                    stack.push(Val::V128(core::array::from_fn(|i| lane[i % 2])));
+                }
+                #[cfg(feature = "simd")]
+                Op::I32x4Splat => {
+                    let lane = pop(&mut stack)?.to_le_bytes();
+                    stack.push(Val::V128(core::array::from_fn(|i| lane[i % 4])));
+                }
+                #[cfg(feature = "simd")]
+                Op::I64x2Splat => {
+                    let lane = pop_i64(&mut stack)?.to_le_bytes();
+                    stack.push(Val::V128(core::array::from_fn(|i| lane[i % 8])));
+                }
+                #[cfg(feature = "simd")]
+                Op::F32x4Splat => {
+                    let lane = pop_f32(&mut stack)?.to_le_bytes();
+                    stack.push(Val::V128(core::array::from_fn(|i| lane[i % 4])));
+                }
+                #[cfg(feature = "simd")]
+                Op::F64x2Splat => {
+                    let lane = pop_f64(&mut stack)?.to_le_bytes();
+                    stack.push(Val::V128(core::array::from_fn(|i| lane[i % 8])));
+                }
+                #[cfg(feature = "simd")]
+                Op::I8x16ExtractLaneS(lane) => {
+                    let value = pop_v128(&mut stack)?[lane as usize] as i8;
+                    stack.push(Val::I32(i32::from(value)));
+                }
+                #[cfg(feature = "simd")]
+                Op::I8x16ExtractLaneU(lane) => {
+                    let value = pop_v128(&mut stack)?[lane as usize];
+                    stack.push(Val::I32(i32::from(value)));
+                }
+                #[cfg(feature = "simd")]
+                Op::I8x16ReplaceLane(lane) => {
+                    let scalar = pop(&mut stack)? as u8;
+                    let mut value = pop_v128(&mut stack)?;
+                    value[lane as usize] = scalar;
+                    stack.push(Val::V128(value));
+                }
+                #[cfg(feature = "simd")]
+                operation @ (Op::I16x8ExtractLaneS(_) | Op::I16x8ExtractLaneU(_)) => {
+                    let value = pop_v128(&mut stack)?;
+                    let lane = match operation {
+                        Op::I16x8ExtractLaneS(lane) | Op::I16x8ExtractLaneU(lane) => lane,
+                        _ => unreachable!(),
+                    } as usize;
+                    let start = lane * 2;
+                    let bits = u16::from_le_bytes([value[start], value[start + 1]]);
+                    let scalar = match operation {
+                        Op::I16x8ExtractLaneS(_) => i32::from(bits as i16),
+                        Op::I16x8ExtractLaneU(_) => i32::from(bits),
+                        _ => unreachable!(),
+                    };
+                    stack.push(Val::I32(scalar));
+                }
+                #[cfg(feature = "simd")]
+                Op::I16x8ReplaceLane(lane) => {
+                    let scalar = (pop(&mut stack)? as i16).to_le_bytes();
+                    let mut value = pop_v128(&mut stack)?;
+                    let start = lane as usize * 2;
+                    value[start..start + 2].copy_from_slice(&scalar);
+                    stack.push(Val::V128(value));
+                }
+                #[cfg(feature = "simd")]
+                Op::I32x4ExtractLane(lane) => {
+                    let value = pop_v128(&mut stack)?;
+                    let start = lane as usize * 4;
+                    stack.push(Val::I32(i32::from_le_bytes(le4(&value[start..start + 4]))));
+                }
+                #[cfg(feature = "simd")]
+                Op::I32x4ReplaceLane(lane) => {
+                    let scalar = pop(&mut stack)?.to_le_bytes();
+                    let mut value = pop_v128(&mut stack)?;
+                    let start = lane as usize * 4;
+                    value[start..start + 4].copy_from_slice(&scalar);
+                    stack.push(Val::V128(value));
+                }
+                #[cfg(feature = "simd")]
+                Op::I64x2ExtractLane(lane) => {
+                    let value = pop_v128(&mut stack)?;
+                    let start = lane as usize * 8;
+                    stack.push(Val::I64(i64::from_le_bytes(le8(&value[start..start + 8]))));
+                }
+                #[cfg(feature = "simd")]
+                Op::I64x2ReplaceLane(lane) => {
+                    let scalar = pop_i64(&mut stack)?.to_le_bytes();
+                    let mut value = pop_v128(&mut stack)?;
+                    let start = lane as usize * 8;
+                    value[start..start + 8].copy_from_slice(&scalar);
+                    stack.push(Val::V128(value));
+                }
+                #[cfg(feature = "simd")]
+                Op::F32x4ExtractLane(lane) => {
+                    let value = pop_v128(&mut stack)?;
+                    let start = lane as usize * 4;
+                    stack.push(Val::F32(f32::from_le_bytes(le4(&value[start..start + 4]))));
+                }
+                #[cfg(feature = "simd")]
+                Op::F32x4ReplaceLane(lane) => {
+                    let scalar = pop_f32(&mut stack)?.to_le_bytes();
+                    let mut value = pop_v128(&mut stack)?;
+                    let start = lane as usize * 4;
+                    value[start..start + 4].copy_from_slice(&scalar);
+                    stack.push(Val::V128(value));
+                }
+                #[cfg(feature = "simd")]
+                Op::F64x2ExtractLane(lane) => {
+                    let value = pop_v128(&mut stack)?;
+                    let start = lane as usize * 8;
+                    stack.push(Val::F64(f64::from_le_bytes(le8(&value[start..start + 8]))));
+                }
+                #[cfg(feature = "simd")]
+                Op::F64x2ReplaceLane(lane) => {
+                    let scalar = pop_f64(&mut stack)?.to_le_bytes();
+                    let mut value = pop_v128(&mut stack)?;
+                    let start = lane as usize * 8;
+                    value[start..start + 8].copy_from_slice(&scalar);
+                    stack.push(Val::V128(value));
                 }
                 #[cfg(feature = "simd")]
                 operation @ (Op::I8x16Add | Op::I8x16Sub) => {

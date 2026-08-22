@@ -95,6 +95,49 @@ fn expected_lanes() -> [[u8; 16]; 11] {
     })
 }
 
+fn expected_bridge() -> [u8; 240] {
+    let mut output = [0; 240];
+    let lane16 = (33_059_u16).to_le_bytes();
+    let lane32 = 305_419_896_i32.to_le_bytes();
+    let lane64 = 81_985_529_216_486_895_i64.to_le_bytes();
+    let lane_f32 = (-13.25_f32).to_le_bytes();
+    let lane_f64 = 12_345.5_f64.to_le_bytes();
+
+    output[0..16].fill(0x80);
+    for start in (16..32).step_by(2) {
+        output[start..start + 2].copy_from_slice(&lane16);
+    }
+    for start in (32..48).step_by(4) {
+        output[start..start + 4].copy_from_slice(&lane32);
+    }
+    for start in (48..64).step_by(8) {
+        output[start..start + 8].copy_from_slice(&lane64);
+    }
+    for start in (64..80).step_by(4) {
+        output[start..start + 4].copy_from_slice(&lane_f32);
+    }
+    for start in (80..96).step_by(8) {
+        output[start..start + 8].copy_from_slice(&lane_f64);
+    }
+
+    output[111] = 0xfe;
+    output[124..126].copy_from_slice(&lane16);
+    output[136..140].copy_from_slice(&lane32);
+    output[152..160].copy_from_slice(&lane64);
+    output[172..176].copy_from_slice(&lane_f32);
+    output[176..184].copy_from_slice(&lane_f64);
+
+    output[192..196].copy_from_slice(&(-128_i32).to_le_bytes());
+    output[196..200].copy_from_slice(&128_i32.to_le_bytes());
+    output[200..204].copy_from_slice(&(-32_767_i32).to_le_bytes());
+    output[204..208].copy_from_slice(&32_769_i32.to_le_bytes());
+    output[208..212].copy_from_slice(&lane32);
+    output[216..224].copy_from_slice(&lane64);
+    output[224..228].copy_from_slice(&lane_f32);
+    output[232..240].copy_from_slice(&lane_f64);
+    output
+}
+
 #[test]
 #[ignore = "run through smoke-wabt-simd-audio.sh with an independently compiled fixture"]
 fn wabt_compiled_simd_game_kernels_match_tinyvm() {
@@ -197,6 +240,20 @@ fn wabt_compiled_simd_game_kernels_match_tinyvm() {
         let start = 256 + operation * 16;
         assert_eq!(&memory[start..start + 16], expected);
     }
+    drop(memory);
+
+    {
+        let mut memory = must(instance.memory_mut(), "borrow SIMD bridge memory");
+        memory[448..688].fill(0xa5);
+    }
+    must(
+        instance.invoke_by_name("bridge", &[Val::I32(448)]),
+        "run SIMD scalar/vector bridge",
+    );
+    assert_eq!(
+        &must(instance.memory(), "read SIMD bridge results")[448..688],
+        &expected_bridge()
+    );
 }
 
 #[test]
@@ -231,6 +288,18 @@ fn v128_game_kernel_validation_rejects_scalar_and_missing_operands() {
             "(module (func (result v128) i32.const 1 i32.const 2 i32x4.add))",
             "validation: type mismatch",
         ),
+        (
+            "(module (func (result v128) i64.const 1 i32x4.splat))",
+            "validation: type mismatch",
+        ),
+        (
+            "(module (func (result i32) i32.const 1 i8x16.extract_lane_s 0))",
+            "validation: type mismatch",
+        ),
+        (
+            "(module (func (result v128) v128.const i32x4 0 0 0 0 i64.const 1 i32x4.replace_lane 0))",
+            "validation: type mismatch",
+        ),
     ] {
         let bytes = wat::parse_str(source).expect("encode invalid SIMD type fixture");
         let error = match WasmModule::from_bytes(&bytes) {
@@ -239,6 +308,24 @@ fn v128_game_kernel_validation_rejects_scalar_and_missing_operands() {
         };
         assert_eq!(error.message(), expected);
     }
+}
+
+#[test]
+fn simd_lane_immediate_is_range_checked_during_decode() {
+    let mut bytes = wat::parse_str(
+        "(module (func (result i32) i32.const -1 i8x16.splat i8x16.extract_lane_s 15))",
+    )
+    .expect("encode valid SIMD lane fixture");
+    let opcode = bytes
+        .windows(3)
+        .position(|window| window == [0xfd, 0x15, 0x0f])
+        .expect("find extract-lane opcode");
+    bytes[opcode + 2] = 16;
+    let error = match WasmModule::from_bytes(&bytes) {
+        Err(error) => error,
+        Ok(_) => panic!("out-of-range SIMD lane must fail at load"),
+    };
+    assert_eq!(error.message(), "SIMD lane index out of range");
 }
 
 #[test]

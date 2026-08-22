@@ -28,6 +28,6 @@ struct TinyArcadeSimdSmoke {
         let snapshot = try runtime.suspend()
         precondition(!snapshot.isEmpty)
         try runtime.close()
-        print("OK: optional SIMD cartridge executed through Swift/C ABI on iOS Simulator")
+        print("OK: optional SIMD audio and lane-bridge cartridge executed through Swift/C ABI on iOS Simulator")
     }
 }

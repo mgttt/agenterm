@@ -57,6 +57,13 @@ grep -Fq 'data.reserveCapacity(envelopeLength)' \
 grep -Fq '.snapshot-v1.prepared"' "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 grep -Fq 'try removePreparedFileIfPresent(temporaryURL)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'defer { try? removePreparedFileIfPresent(temporaryURL) }' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+if grep -Fq 'defer { try? FileManager.default.removeItem(at: temporaryURL) }' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
+  echo "failed snapshot preparation must not recursively delete another writer's slot" >&2
+  exit 1
+fi
 grep -Fq 'snapshot: data[(32 + idLength)..<data.count]' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 grep -Fq 'options: .usingNewMetadataOnly' \
@@ -103,6 +110,7 @@ xcrun --sdk iphonesimulator clang \
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
   -D TINYARCADE_EXTERNAL_CARTRIDGES \
+  -D TINYARCADE_TEST_HOOKS \
   -warnings-as-errors \
   -O \
   -target arm64-apple-ios14.0-simulator \
@@ -116,6 +124,7 @@ xcrun --sdk iphonesimulator swiftc \
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
   -D TINYARCADE_EXTERNAL_CARTRIDGES \
+  -D TINYARCADE_TEST_HOOKS \
   -warnings-as-errors \
   -O \
   -target x86_64-apple-ios14.0-simulator \
@@ -328,26 +337,30 @@ swift package --package-path "$PACKAGE" dump-package >/dev/null
     CODE_SIGNING_ALLOWED=NO build
 )
 
-if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
+SIMULATOR_RUN=${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}
+if [ "$SIMULATOR_RUN" = simd ]; then
+  case ",$RUST_FEATURES," in
+    *,simd,*) ;;
+    *) echo 'simd simulator run requires the simd Cargo feature' >&2; exit 1 ;;
+  esac
+  SIMD_CARTRIDGE="$TEMP/simd-audio-0.1.0.wasm"
+  CARGO="$CARGO" "$CRATE/build-simd-audio-cartridge.sh" "$SIMD_CARTRIDGE" >/dev/null
+  xcrun simctl spawn booted "$TEMP/TinyArcadeSimdSmoke-arm64" "$SIMD_CARTRIDGE"
+elif [ "$SIMULATOR_RUN" = 1 ]; then
+  case ",$RUST_FEATURES," in
+    *,simd,*)
+      echo 'full simulator suite is the default profile; use simd for the focused SIMD profile' >&2
+      exit 1
+      ;;
+  esac
   DEPTH_CARTRIDGE="$TEMP/depth-well-0.1.0.wasm"
   PADDLE_CARTRIDGE="$TEMP/paddle-guard-0.1.0.wasm"
   COMPLETION_CARTRIDGE="$TEMP/async-completion-0.1.0.wasm"
   "$CRATE/build-depth-well-cartridge.sh" "$DEPTH_CARTRIDGE" >/dev/null
   "$CRATE/build-paddle-guard-cartridge.sh" "$PADDLE_CARTRIDGE" >/dev/null
   "$CRATE/build-async-completion-cartridge.sh" "$COMPLETION_CARTRIDGE" >/dev/null
-  case ",$RUST_FEATURES," in
-    *,simd,*)
-      SIMD_CARTRIDGE="$TEMP/simd-audio-0.1.0.wasm"
-      CARGO="$CARGO" "$CRATE/build-simd-audio-cartridge.sh" "$SIMD_CARTRIDGE" >/dev/null
-      xcrun simctl spawn booted "$TEMP/TinyArcadeSmoke-arm64" \
-        "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
-      xcrun simctl spawn booted "$TEMP/TinyArcadeSimdSmoke-arm64" "$SIMD_CARTRIDGE"
-      ;;
-    *)
-      xcrun simctl spawn booted "$TEMP/TinyArcadeSmoke-arm64" \
-        "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
-      ;;
-  esac
+  xcrun simctl spawn booted "$TEMP/TinyArcadeSmoke-arm64" \
+    "$DEPTH_CARTRIDGE" "$PADDLE_CARTRIDGE"
   xcrun simctl spawn booted "$TEMP/TinyArcadeHostProfileCatalogSmoke-arm64"
   xcrun simctl spawn booted "$TEMP/TinyArcadeReviewedFlowSmoke-arm64" \
     "$PADDLE_CARTRIDGE"
@@ -361,6 +374,9 @@ if [ "${TINYARCADE_RUN_BOOTED_SIMULATOR:-0}" = 1 ]; then
     "$PADDLE_CARTRIDGE"
   xcrun simctl spawn booted "$TEMP/TinyArcadeCompletionSmoke-arm64" \
     "$COMPLETION_CARTRIDGE"
+elif [ "$SIMULATOR_RUN" != 0 ]; then
+  echo 'TINYARCADE_RUN_BOOTED_SIMULATOR must be 0, 1 or simd' >&2
+  exit 1
 fi
 
 echo "OK: iOS device + universal simulator XCFramework and Swift package; links arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} completion=${COMPLETION_LINKED_BYTES} simd=${SIMD_LINKED_BYTES} bytes"

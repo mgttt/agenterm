@@ -12,12 +12,91 @@
 
   (func (export "game_abi_version") (result i32) i32.const 1)
 
+  (func $lane_bridge_ok (result i32)
+    i32.const -128
+    i8x16.splat
+    i32.const 510
+    i8x16.replace_lane 15
+    i8x16.extract_lane_s 0
+    i32.const -128
+    i32.ne
+    if i32.const 0 return end
+    i32.const -128
+    i8x16.splat
+    i32.const 510
+    i8x16.replace_lane 15
+    i8x16.extract_lane_u 15
+    i32.const 254
+    i32.ne
+    if i32.const 0 return end
+
+    i32.const -32767
+    i16x8.splat
+    i32.const 33059
+    i16x8.replace_lane 6
+    i16x8.extract_lane_s 0
+    i32.const -32767
+    i32.ne
+    if i32.const 0 return end
+    i32.const -32767
+    i16x8.splat
+    i32.const 33059
+    i16x8.replace_lane 6
+    i16x8.extract_lane_u 6
+    i32.const 33059
+    i32.ne
+    if i32.const 0 return end
+
+    i32.const 7
+    i32x4.splat
+    i32.const 305419896
+    i32x4.replace_lane 2
+    i32x4.extract_lane 2
+    i32.const 305419896
+    i32.ne
+    if i32.const 0 return end
+
+    i64.const 7
+    i64x2.splat
+    i64.const 81985529216486895
+    i64x2.replace_lane 1
+    i64x2.extract_lane 1
+    i64.const 81985529216486895
+    i64.ne
+    if i32.const 0 return end
+
+    f32.const 7.5
+    f32x4.splat
+    f32.const -13.25
+    f32x4.replace_lane 3
+    f32x4.extract_lane 3
+    f32.const -13.25
+    f32.ne
+    if i32.const 0 return end
+
+    f64.const 7.5
+    f64x2.splat
+    f64.const 12345.5
+    f64x2.replace_lane 0
+    f64x2.extract_lane 0
+    f64.const 12345.5
+    f64.ne
+    if i32.const 0 return end
+    i32.const 1)
+
   (func (export "game_init") (result i32)
     call $indexed2d_version
     i32.const 1
     i32.ne
     if
       i32.const 1
+      return
+    end
+
+    call $lane_bridge_ok
+    i32.eqz
+    if
+      i32.const 6
       return
     end
 

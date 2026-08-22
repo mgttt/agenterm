@@ -66,11 +66,14 @@ ABI/state-schema-bound snapshot. A save reserves one exact envelope buffer and
 writes it to one same-directory, per-game prepared slot. A stale regular file
 or symlink in that private slot is reclaimed before reuse; unexpected special
 files and directories fail closed, so interrupted saves cannot accumulate
-unbounded UUID artifacts or trigger recursive cleanup. The store applies
-complete-until-first-authentication protection there, and only then atomically
-moves or replaces the published generation. Failure before publication removes
-the prepared file and leaves the previous snapshot byte-for-byte intact. The
-directory is excluded from backup. Reads reject symlinks and
+unbounded UUID artifacts or trigger recursive cleanup. Both entry cleanup and
+failure cleanup use that same type-checked path; a failed save cannot fall back
+to recursive `removeItem` and erase a directory owned by another writer. The
+store applies complete-until-first-authentication protection there, and only
+then atomically moves or replaces the published generation. Failure before
+publication removes the prepared file and leaves the previous snapshot
+byte-for-byte intact. The directory is excluded from backup. Reads reject
+symlinks and
 oversized/non-regular files. A corrupt or
 incompatible snapshot is removed; the failed candidate runtime is closed and a
 second clean runtime is returned with `discardedInvalid`, so save damage cannot
@@ -450,6 +453,12 @@ decodes its first frame, suspends/resumes and hard-drops. Paddle Guard executes
 suspend into a fresh instance during the measured run. Its real launch event is
 also synthesized into a WAV, passed through `AVAudioPlayer`, interrupted and
 explicitly deactivated on the booted simulator.
+Because some current Simulator filesystems accept file-protection attributes
+without returning them from `attributesOfItem`, simulator execution requires an
+exact value when the attribute is surfaced; physical-device readback remains
+the product evidence gate. `TINYARCADE_RUN_BOOTED_SIMULATOR=simd` separately
+runs the focused optional SIMD cartridge, including its scalar/vector lane
+bridge, without pretending the default and optional host profiles are the same.
 The focused completion executable also runs its independently compiled
 511-byte standard cartridge: Swift allocates the request during the native
 start callback, renders the pending state, delivers RGBA bytes on the main

@@ -358,9 +358,8 @@ struct TinyArcadeSmoke {
         firstGamepad.buttonMenu.setValue(1)
         secondGamepad.leftThumbstick.setValueForXAxis(1, yAxis: -1)
         secondGamepad.buttonB.setValue(1)
-        await withCheckedContinuation { continuation in
-            DispatchQueue.main.async { continuation.resume() }
-        }
+        appleInput.refresh(firstController)
+        appleInput.refresh(secondController)
         precondition(
             aggregatedControllerInput.buttons == [
                 .left, .right, .up, .down, .primary, .secondary, .menu,
@@ -372,16 +371,12 @@ struct TinyArcadeSmoke {
         precondition(!appleInput.isActive)
         secondGamepad.leftThumbstick.setValueForXAxis(0, yAxis: 0)
         secondGamepad.buttonB.setValue(0)
-        await withCheckedContinuation { continuation in
-            DispatchQueue.main.async { continuation.resume() }
-        }
+        appleInput.refresh(secondController)
         precondition(aggregatedControllerInput.buttons.isEmpty)
         appleInput.activate()
         secondGamepad.dpad.setValueForXAxis(0, yAxis: 1)
         secondGamepad.buttonX.setValue(1)
-        await withCheckedContinuation { continuation in
-            DispatchQueue.main.async { continuation.resume() }
-        }
+        appleInput.refresh(secondController)
         precondition(aggregatedControllerInput.buttons == [.up, .tertiary])
         appleInput.detach(secondController)
         precondition(aggregatedControllerInput.buttons.isEmpty)

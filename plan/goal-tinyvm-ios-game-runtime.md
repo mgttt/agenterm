@@ -4480,3 +4480,42 @@ passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
 journey and an arm64 device Release build. Physical-iPhone lifecycle and
 TestFlight install/play evidence remain open, so the persistent goal stays
 active.
+
+## One-hundred-forty-fifth executable increment — SIMD scalar/lane bridge
+
+The optional standard SIMD game-kernel profile now has the scalar/vector bridge
+needed by compiled C and Rust kernels: all six standard splats (`i8x16`,
+`i16x8`, `i32x4`, `i64x2`, `f32x4`, `f64x2`), signed and unsigned narrow-lane
+extracts, the remaining four extracts, and all six lane replacements. Lane
+immediates are range-checked while decoding, before a module can be invoked.
+Execution uses canonical little-endian bytes, preserves floating-point bit
+patterns and applies the standard sign-extension and low-bit replacement rules;
+validation enforces each exact scalar/vector signature. The default profile
+continues to reject SIMD.
+
+Evidence on 2026-08-22: WABT independently compiles and validates the 969-byte
+fixture, and tinyvm, JavaScriptCore and a real headless H5 browser agree on all
+240 scalar-bridge result bytes as well as the existing audio, mask and wrapping
+lane vectors. The reviewed cartridge executes every bridge family during
+`game_init`, and a focused booted iOS Simulator owner runs it through the public
+Swift/C ABI. The 147-claim executable PRD map and complete all-feature suite
+pass. Warnings-denied Clippy, rustfmt, ShellCheck, the ten-family standard
+matrix and four-cartridge JSC/H5 differential also pass. Default and SIMD
+static cores are 101,256 and 117,800 bytes. Default iOS consumers link at
+1,795,576 bytes arm64 and 1,889,040 bytes x86_64; opt-in SIMD consumers link at
+1,797,832 / 1,901,624 bytes, with the focused SIMD execution owner at 1,622,952
+bytes. No new product-size graduation is required.
+
+The booted simulator suite also exposed a real snapshot-store failure-path bug:
+after type-checked prepared-file cleanup rejected a foreign directory, a broad
+deferred `removeItem` could still recursively delete it. The defer now reuses
+the same regular-file-only cleanup helper, and the smoke preserves a directory
+sentinel while exercising the failure. Synthetic controller refresh remains
+compiled only under `TINYARCADE_TEST_HOOKS`; production input behavior is
+unchanged. The real Nostalgia Arcade consumer rebuilds the exact default archive
+(SHA-256
+`993d10fc3128a85c867883f4e97bfe29ab1c3195609fd025e5ff62762c14028c`),
+passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
+journey and an arm64 device Release build. Physical-iPhone lifecycle and
+TestFlight install/play evidence remain open, so the persistent goal stays
+active.

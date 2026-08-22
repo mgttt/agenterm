@@ -440,6 +440,71 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.pop_expect(V128)?;
             v.push(I32);
         }
+        #[cfg(feature = "simd")]
+        I8x16Splat | I16x8Splat | I32x4Splat => {
+            v.pop_expect(I32)?;
+            v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        I64x2Splat => {
+            v.pop_expect(I64)?;
+            v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        F32x4Splat => {
+            v.pop_expect(F32)?;
+            v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        F64x2Splat => {
+            v.pop_expect(F64)?;
+            v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        I8x16ExtractLaneS(_) | I8x16ExtractLaneU(_) | I16x8ExtractLaneS(_)
+        | I16x8ExtractLaneU(_) | I32x4ExtractLane(_) => {
+            v.pop_expect(V128)?;
+            v.push(I32);
+        }
+        #[cfg(feature = "simd")]
+        I64x2ExtractLane(_) => {
+            v.pop_expect(V128)?;
+            v.push(I64);
+        }
+        #[cfg(feature = "simd")]
+        F32x4ExtractLane(_) => {
+            v.pop_expect(V128)?;
+            v.push(F32);
+        }
+        #[cfg(feature = "simd")]
+        F64x2ExtractLane(_) => {
+            v.pop_expect(V128)?;
+            v.push(F64);
+        }
+        #[cfg(feature = "simd")]
+        I8x16ReplaceLane(_) | I16x8ReplaceLane(_) | I32x4ReplaceLane(_) => {
+            v.pop_expect(I32)?;
+            v.pop_expect(V128)?;
+            v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        I64x2ReplaceLane(_) => {
+            v.pop_expect(I64)?;
+            v.pop_expect(V128)?;
+            v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        F32x4ReplaceLane(_) => {
+            v.pop_expect(F32)?;
+            v.pop_expect(V128)?;
+            v.push(V128);
+        }
+        #[cfg(feature = "simd")]
+        F64x2ReplaceLane(_) => {
+            v.pop_expect(F64)?;
+            v.pop_expect(V128)?;
+            v.push(V128);
+        }
 
         // --- i32 unary / binary / comparison ---
         I32Clz | I32Ctz | I32Popcnt | I32Eqz => {

@@ -78,13 +78,50 @@ struct SimdAudioOracle {
                 const actual = bytes[256 + operation * 16 + index];
                 if (actual !== value) throw new Error(`lanes ${operation}:${index}=${actual}`);
               }));
-              return `${added}|${subtracted}|mask=${any}|lanes=pass`;
+              const bridge = new Uint8Array(240);
+              const bridgeView = new DataView(bridge.buffer);
+              const writeUnsigned = (offset, value, width) => {
+                let bits = BigInt(value);
+                for (let byte = 0; byte < width; byte++) {
+                  bridge[offset + byte] = Number((bits >> BigInt(byte * 8)) & 0xffn);
+                }
+              };
+              const repeat = (offset, count, width, writer) => {
+                for (let lane = 0; lane < count; lane++) writer(offset + lane * width);
+              };
+              bridge.fill(0x80, 0, 16);
+              repeat(16, 8, 2, offset => bridgeView.setUint16(offset, 33059, true));
+              repeat(32, 4, 4, offset => bridgeView.setInt32(offset, 305419896, true));
+              repeat(48, 2, 8, offset => writeUnsigned(offset, 81985529216486895n, 8));
+              repeat(64, 4, 4, offset => bridgeView.setFloat32(offset, -13.25, true));
+              repeat(80, 2, 8, offset => bridgeView.setFloat64(offset, 12345.5, true));
+              bridge[111] = 0xfe;
+              bridgeView.setUint16(124, 33059, true);
+              bridgeView.setInt32(136, 305419896, true);
+              writeUnsigned(152, 81985529216486895n, 8);
+              bridgeView.setFloat32(172, -13.25, true);
+              bridgeView.setFloat64(176, 12345.5, true);
+              bridgeView.setInt32(192, -128, true);
+              bridgeView.setInt32(196, 128, true);
+              bridgeView.setInt32(200, -32767, true);
+              bridgeView.setInt32(204, 32769, true);
+              bridgeView.setInt32(208, 305419896, true);
+              writeUnsigned(216, 81985529216486895n, 8);
+              bridgeView.setFloat32(224, -13.25, true);
+              bridgeView.setFloat64(232, 12345.5, true);
+              bytes.fill(0xa5, 448, 688);
+              instance.exports.bridge(448);
+              bridge.forEach((value, index) => {
+                const actual = bytes[448 + index];
+                if (actual !== value) throw new Error(`bridge ${index}=${actual}`);
+              });
+              return `${added}|${subtracted}|mask=${any}|lanes=pass|bridge=pass`;
             })()
             """
         )
         if let javascriptError { throw OracleError.javascript(javascriptError) }
         let result = value?.toString() ?? ""
-        let expected = "32767,-32768,300,-300,32767,-32768,-5000,5000|20000,-20000,-100,100,32766,-32767,32767,-32768|mask=1,0|lanes=pass"
+        let expected = "32767,-32768,300,-300,32767,-32768,-5000,5000|20000,-20000,-100,100,32766,-32767,32767,-32768|mask=1,0|lanes=pass|bridge=pass"
         guard result == expected else { throw OracleError.wrongResult(result) }
         print("OK: JavaScriptCore SIMD game kernels=\(result)")
     }

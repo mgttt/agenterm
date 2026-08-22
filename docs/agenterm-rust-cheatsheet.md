@@ -2880,3 +2880,12 @@ lane bits back. Signed and unsigned wrapping arithmetic have the same bit
 result, so one representation is sufficient. Include overflow-heavy bytes and
 64-bit products in a JavaScript `BigInt` oracle; ordinary `Number` arithmetic
 cannot independently prove all `i64x2` results.
+
+SIMD lane access has three separate correctness gates. Decode the one-byte lane
+immediate and reject indexes outside the shape before the module can execute;
+validate the scalar type independently for every splat/extract/replace family;
+then execute through canonical little-endian bytes. Narrow integer replacement
+keeps the low bits, signed 8/16-bit extraction sign-extends to `i32`, and float
+lanes preserve their exact IEEE-754 representation. A useful oracle serializes
+all results into memory and compares every byte across WABT-compiled tinyvm,
+JavaScriptCore and browser executions.

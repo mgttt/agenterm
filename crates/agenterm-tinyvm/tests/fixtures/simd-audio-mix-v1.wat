@@ -171,4 +171,130 @@
     v128.load
     i64x2.mul
     v128.store offset=160)
+
+  ;; Scalar/vector lane bridge emitted by portable C/Rust SIMD frontends.
+  ;; Six splats, six replacements and all signed/unsigned/numeric extraction
+  ;; result families are serialized so independent engines can compare bytes.
+  (func (export "bridge") (param $output i32)
+    local.get $output
+    i32.const -128
+    i8x16.splat
+    v128.store
+
+    local.get $output
+    i32.const 33059
+    i16x8.splat
+    v128.store offset=16
+
+    local.get $output
+    i32.const 305419896
+    i32x4.splat
+    v128.store offset=32
+
+    local.get $output
+    i64.const 81985529216486895
+    i64x2.splat
+    v128.store offset=48
+
+    local.get $output
+    f32.const -13.25
+    f32x4.splat
+    v128.store offset=64
+
+    local.get $output
+    f64.const 12345.5
+    f64x2.splat
+    v128.store offset=80
+
+    local.get $output
+    v128.const i32x4 0 0 0 0
+    i32.const 510
+    i8x16.replace_lane 15
+    v128.store offset=96
+
+    local.get $output
+    v128.const i32x4 0 0 0 0
+    i32.const 33059
+    i16x8.replace_lane 6
+    v128.store offset=112
+
+    local.get $output
+    v128.const i32x4 0 0 0 0
+    i32.const 305419896
+    i32x4.replace_lane 2
+    v128.store offset=128
+
+    local.get $output
+    v128.const i32x4 0 0 0 0
+    i64.const 81985529216486895
+    i64x2.replace_lane 1
+    v128.store offset=144
+
+    local.get $output
+    v128.const i32x4 0 0 0 0
+    f32.const -13.25
+    f32x4.replace_lane 3
+    v128.store offset=160
+
+    local.get $output
+    v128.const i32x4 0 0 0 0
+    f64.const 12345.5
+    f64x2.replace_lane 0
+    v128.store offset=176
+
+    local.get $output
+    i32.const -128
+    i8x16.splat
+    i8x16.extract_lane_s 7
+    i32.store offset=192
+
+    local.get $output
+    i32.const -128
+    i8x16.splat
+    i8x16.extract_lane_u 7
+    i32.store offset=196
+
+    local.get $output
+    i32.const -32767
+    i16x8.splat
+    i16x8.extract_lane_s 5
+    i32.store offset=200
+
+    local.get $output
+    i32.const -32767
+    i16x8.splat
+    i16x8.extract_lane_u 5
+    i32.store offset=204
+
+    local.get $output
+    i32.const 305419896
+    i32x4.splat
+    i32x4.extract_lane 3
+    i32.store offset=208
+
+    local.get $output
+    i32.const 0
+    i32.store offset=212
+
+    local.get $output
+    i64.const 81985529216486895
+    i64x2.splat
+    i64x2.extract_lane 1
+    i64.store offset=216
+
+    local.get $output
+    f32.const -13.25
+    f32x4.splat
+    f32x4.extract_lane 2
+    f32.store offset=224
+
+    local.get $output
+    i32.const 0
+    i32.store offset=228
+
+    local.get $output
+    f64.const 12345.5
+    f64x2.splat
+    f64x2.extract_lane 1
+    f64.store offset=232)
 )
