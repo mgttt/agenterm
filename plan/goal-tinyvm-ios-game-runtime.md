@@ -82,7 +82,8 @@ tinyvm iOS game runtime
 │   ├── app-build host profile        [x]
 │   │   ├── exact zero-budget channel semantics [x]
 │   │   ├── profile-bound descriptor return [x]
-│   │   └── typed compatibility issue report [x]
+│   │   ├── typed compatibility issue report [x]
+│   │   └── exact-build Wasm feature negotiation [x]
 │   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
 ├── iOS native bridge                 [~]
@@ -4288,6 +4289,34 @@ The complete all-feature suite, JSC/H5 differential, warnings-denied Clippy,
 rustfmt, ShellCheck and the 138-leaf executable PRD map pass. The real App
 consumes the exact ABI v1.12 archive with SHA-256
 `7932583339a4b5c2ba22291b3329bab0447d3d37e4d97fa26f0c7797a61997f7`,
+passes eight Depth Well tests, five Signal Lock tests, one UI journey and an
+unsigned arm64 device Release build. Physical-device and TestFlight evidence
+remain open, so the persistent goal stays active.
+
+## One-hundred-thirty-eighth executable increment — exact-build Wasm features
+
+TAH1 schema 4 now binds every profile to the accepted standard Wasm feature
+families of the exact app build instead of describing only resource limits and
+native imports. Scalar Wasm remains implicit; the optional SIMD bit is named
+`simd-signed-pcm-v1` so a partial reviewed DSP subset can never be mistaken for
+the complete SIMD proposal. Schemas 1–3 remain readable and conservatively map
+to the non-SIMD feature profile. Unknown future bits fail closed.
+
+`HostProfileV1::compatibility_report`, the CLI and TAC1 schema 2 preserve an
+unsupported-feature bitmap independently from typed import issues. Swift
+exposes the same bounded result through `TinyArcadeWasmFeatureSetV1`; matching
+and mismatching paths remain callback-free and do not instantiate the guest.
+An all-feature black box proves that the same valid SIMD cartridge passes an
+exact SIMD profile, then becomes one explicit
+`wasm-feature.simd-signed-pcm-v1` issue under a profile with that bit removed.
+
+Evidence on 2026-08-22: the 139-leaf executable PRD map and complete
+all-feature suite pass. Default iOS consumers link at 1,797,032 bytes arm64 and
+1,890,432 bytes x86_64; opt-in SIMD links at 1,797,816 / 1,894,456 bytes. All
+four remain inside the pre-existing finite gates after replacing Swift's
+unnecessarily heavy generic `OptionSet` conformance with a typed bounded value.
+The real App consumes the exact ABI v1.13 archive with SHA-256
+`28b510624c430f1c4ce337b8bcb10796c6b1fac3f9e8d1dc75985143d576be7e`,
 passes eight Depth Well tests, five Signal Lock tests, one UI journey and an
 unsigned arm64 device Release build. Physical-device and TestFlight evidence
 remain open, so the persistent goal stays active.

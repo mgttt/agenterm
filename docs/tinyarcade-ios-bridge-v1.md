@@ -406,6 +406,11 @@ ABI v1.11 only appends the combined static compatibility/descriptor export.
 It changes no struct layout, callback ownership rule or cartridge ABI.
 ABI v1.12 similarly appends only the static typed-report export and Swift
 value types; the runtime/config layouts remain unchanged.
+ABI v1.13 changes no runtime/config layout. It upgrades generated TAH1 to
+schema 4 with an exact-build accepted-Wasm-feature bitmap and TAC1 to the
+backward-decodable schema 2 bitmap. Swift exposes that result as
+`TinyArcadeWasmFeatureSetV1`; the SIMD bit explicitly means the reviewed signed
+PCM subset rather than the complete SIMD proposal.
 
 ## Current evidence boundary
 
@@ -496,10 +501,10 @@ unit tests plus the two-game UI journey, and builds the generic arm64 iOS
 product. It then requires the consumer's archive to be byte-identical to the
 one emitted under this repository's `target/`, checks that the final executable
 contains the ABI v1.10 completion-channel symbol while consuming the current
-v1.12 archive, and rejects any implicit
+v1.13 archive, and rejects any implicit
 rewrite of the committed cartridges or Xcode project. Evidence on 2026-08-22
 has archive SHA-256
-`7932583339a4b5c2ba22291b3329bab0447d3d37e4d97fa26f0c7797a61997f7`;
+`28b510624c430f1c4ce337b8bcb10796c6b1fac3f9e8d1dc75985143d576be7e`;
 the App contains only the 6,116-byte Depth Well and 6,040-byte Signal Lock
 cartridges, with no WebKit/JavaScriptCore, URLSession, external-library surface
 or archived native game engine. A counted App-target test now takes a tone from

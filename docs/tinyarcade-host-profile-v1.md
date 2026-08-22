@@ -13,8 +13,8 @@ All integers are little-endian. The complete artifact is at most 64 KiB.
 
 ```text
 "TAH1"                       4 bytes
-schema_version                u16; exactly 3
-header_length                 u16; exactly 68
+schema_version                u16; exactly 4
+header_length                 u16; exactly 72
 game_abi_version              u32; exactly 1
 max_cartridge_bytes           u32; exactly 2 MiB
 max_table_elems               u32; non-zero aggregate across all tables
@@ -32,6 +32,7 @@ reserved                      u16; zero
 max_call_depth                u32; non-zero defined activations
 max_activation_slots          u32; non-zero aggregate live VM slots
 reserved                      u32; zero
+accepted_wasm_features        u32; canonical bitmap described below
 repeated native function, sorted by module then field bytes:
   module_length               u16
   field_length                u16
@@ -43,13 +44,25 @@ repeated native function, sorted by module then field bytes:
   field                       canonical snake_case UTF-8
 ```
 
-Decoders also accept schema-1 (56 bytes) and schema-2 (64 bytes). Schema 1
+The feature bitmap assigns bits in this order: bulk memory, sign extension,
+nontrapping float-to-int, multi-value, reference types, multiple tables,
+multiple memories, extended constant expressions, tail calls, and
+`simd-signed-pcm-v1`. Scalar WebAssembly is implicit. The last bit names only
+tinyvm's reviewed `v128` load/store/constant plus signed saturating i16x8 PCM
+add/sub subset; it never claims complete WebAssembly SIMD.
+These bits describe proposal families recognized by the exact decoder build;
+they do not override game-profile structural rules such as the required single
+linear memory. Full profile inspection remains authoritative.
+
+Decoders also accept schema-1 (56 bytes), schema-2 (64 bytes), and schema-3
+(68 bytes). Schema 1
 predates configurable call resources and maps deterministically to 512 live
-defined activations and 1,048,576 aggregate activation slots. Both older
-schemas predate indexed2d application metadata and therefore report that core
-import unavailable during compatibility checks. Encoders always emit schema
-3. This preserves already published profiles without falsely claiming a newer
-host capability.
+defined activations and 1,048,576 aggregate activation slots. Schemas 1 and 2
+predate indexed2d application metadata and therefore report that core import
+unavailable during compatibility checks. All three older schemas predate the
+feature bitmap and conservatively map to the accepted non-SIMD profile. Encoders
+always emit schema 4. This preserves already published profiles without falsely
+claiming a newer host capability.
 
 Duplicate, unordered, malformed, unknown-version and trailing data fail closed.
 Changing any limit, media version, namespace, signature or quota changes the
@@ -66,6 +79,7 @@ budget, while a stateless guest may explicitly save and restore zero bytes.
 standard cartridge
   → manifest + lifecycle + standard import validation
   → declared initial memory/table checked against TAH1
+  → every used accepted-proposal family present in the exact-build bitmap
   → every native import matched by exact module/field/i32 signature
   → compatible for installation preflight
   → dynamic fuel/output/native-semantic conformance still required
@@ -85,17 +99,18 @@ publishing callbacks, dylibs, JIT/AOT products or tinyvm internals.
 
 ## Canonical compatibility report
 
-C ABI v1.12 and Swift can carry the complete static result as a bounded TAC1
+C ABI v1.13 and Swift carry the complete static result as a bounded TAC1
 artifact. All integers are little-endian and the complete report is at most
 64 KiB:
 
 ```text
 "TAC1"                       4 bytes
-schema_version                u16; exactly 1
-header_length                 u16; exactly 16
+schema_version                u16; exactly 2
+header_length                 u16; exactly 20
 issue_count                   u16; at most 72
 reserved                      u16; zero
 descriptor_length             u32
+unsupported_wasm_features     u32; same canonical bitmap as TAH1
 descriptor                    exact canonical TAD1 bytes
 repeated issue; indexed2d-metadata availability first when present, then
 native issues in cartridge import order:
@@ -109,8 +124,10 @@ native issues in cartridge import order:
   field                       canonical UTF-8 bytes
 ```
 
-The two available counts are either both present or both `255`. A compatible
-report has zero issues but still carries the profile-bound descriptor. An
+Decoders retain TAC1 schema-1 compatibility; its absent feature bitmap maps to
+zero. The two available counts are either both present or both `255`. A
+compatible report has a zero unsupported-feature bitmap and zero issues but
+still carries the profile-bound descriptor. An
 incompatible report is successful report data rather than a guest trap;
 malformed WASM, malformed TAH1 and resource-limit failures remain errors. TAC1
 is callback-free, performs no instantiation and grants no install authority.
@@ -128,16 +145,18 @@ tinyvm cartridge check-profile game.wasm ios-build.tahost
 `check-profile` prints a stable key/value compatibility report. A compatible
 cartridge reports `compatibility_issues=0` and `compatible=true`. A valid but
 incompatible cartridge still reports its identity and one `issue=` row per
-native import, distinguishing a wholly missing function from an exact
-parameter/result signature mismatch; it then exits unsuccessfully. Parse,
-resource-limit and malformed-profile errors remain separate failures rather
-than being flattened into compatibility issues.
+unavailable feature or native import, distinguishing an unsupported proposal,
+a wholly missing function and an exact parameter/result signature mismatch; it
+then exits unsuccessfully. Parse, resource-limit and malformed-profile errors
+remain separate failures rather than being flattened into compatibility issues.
 
 Library converters use `HostProfileV1::compatibility_report` for the same
 non-executing result. Each issue carries the required module, field and arity,
 plus the available arity when that app build has the same named function with
-the wrong signature. `inspect_cartridge` remains the fail-fast compatibility
-door for existing consumers.
+the wrong signature. `unsupported_features` independently identifies proposal
+families the cartridge uses but the target app build does not advertise.
+`inspect_cartridge` remains the fail-fast compatibility door for existing
+consumers.
 
 Rust app hosts use `NativeModuleRegistry::host_profile`; C hosts use the
 two-stage `tinyarcade_v1_copy_host_profile`; Swift uses

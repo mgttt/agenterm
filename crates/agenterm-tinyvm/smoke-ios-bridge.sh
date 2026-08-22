@@ -258,6 +258,8 @@ COMPLETION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeCompletionSmoke-arm64")
 # ABI v1.12 adds the public typed Swift issue model, strict TAC1 decoder and
 # full matching/missing/signature-mismatch paths. That creator-tooling boundary
 # crosses two 16 KiB buckets; keep the new ceiling explicit and finite.
+# ABI v1.13 adds exact-build Wasm feature negotiation to TAH1/TAC1 and remains
+# inside the same explicit product ceiling.
 MAX_ARM64_LINKED_BYTES=1802240
 # The optional SIMD profile keeps v128 inline and adds its portable interpreter
 # path only when explicitly requested. Give that opt-in product two separate

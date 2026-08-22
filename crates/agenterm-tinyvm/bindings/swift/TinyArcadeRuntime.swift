@@ -1870,6 +1870,32 @@ public struct TinyArcadeNativeFunctionV1 {
     }
 }
 
+public struct TinyArcadeWasmFeatureSetV1: Sendable, Equatable {
+    public let rawValue: UInt32
+
+    public init(rawValue: UInt32) { self.rawValue = rawValue }
+
+    public var isEmpty: Bool { rawValue == 0 }
+
+    public func contains(_ feature: Self) -> Bool {
+        rawValue & feature.rawValue == feature.rawValue
+    }
+
+    public static var bulkMemory: Self { Self(rawValue: 1 << 0) }
+    public static var signExtension: Self { Self(rawValue: 1 << 1) }
+    public static var nontrappingFloatToInt: Self { Self(rawValue: 1 << 2) }
+    public static var multiValue: Self { Self(rawValue: 1 << 3) }
+    public static var referenceTypes: Self { Self(rawValue: 1 << 4) }
+    public static var multipleTables: Self { Self(rawValue: 1 << 5) }
+    public static var multipleMemories: Self { Self(rawValue: 1 << 6) }
+    public static var extendedConst: Self { Self(rawValue: 1 << 7) }
+    public static var tailCall: Self { Self(rawValue: 1 << 8) }
+    /// The reviewed i16x8 signed saturating PCM subset, not complete SIMD.
+    public static var simdSignedPCMV1: Self { Self(rawValue: 1 << 9) }
+
+    fileprivate static var knownMask: UInt32 { (1 << 10) - 1 }
+}
+
 public struct TinyArcadeHostCompatibilityIssueV1: Sendable, Equatable {
     public let module: String
     public let field: String
@@ -1896,12 +1922,13 @@ public struct TinyArcadeHostCompatibilityIssueV1: Sendable, Equatable {
 }
 
 /// Static, callback-free compatibility result for one cartridge and exact
-/// TAH1 app-build profile. An empty issue list is compatible.
+/// TAH1 app-build profile. Both feature and import issue sets must be empty.
 public struct TinyArcadeHostCompatibilityReportV1: Sendable {
     public let descriptor: TinyArcadeCartridgeDescriptorV1
+    public let unsupportedFeatures: TinyArcadeWasmFeatureSetV1
     public let issues: [TinyArcadeHostCompatibilityIssueV1]
 
-    public var isCompatible: Bool { issues.isEmpty }
+    public var isCompatible: Bool { unsupportedFeatures.isEmpty && issues.isEmpty }
 
     fileprivate static func decode(
         _ data: Data,
@@ -1909,25 +1936,41 @@ public struct TinyArcadeHostCompatibilityReportV1: Sendable {
     ) throws -> Self {
         guard data.count >= 48,
               data.prefix(4) == Data("TAC1".utf8),
-              TinyArcadeCartridgeDescriptorV1.u16(data, 4) == 1,
-              TinyArcadeCartridgeDescriptorV1.u16(data, 6) == 16,
               TinyArcadeCartridgeDescriptorV1.u16(data, 10) == 0 else {
             throw TinyArcadeCartridgeDescriptorV1.decodeError(
                 "invalid host compatibility report header"
             )
         }
+        let schema = TinyArcadeCartridgeDescriptorV1.u16(data, 4)
+        let headerLength = Int(TinyArcadeCartridgeDescriptorV1.u16(data, 6))
+        let featureBits: UInt32
+        switch (schema, headerLength) {
+        case (1, 16):
+            featureBits = 0
+        case (2, 20) where data.count >= 52:
+            featureBits = TinyArcadeCartridgeDescriptorV1.u32(data, 16)
+        default:
+            throw TinyArcadeCartridgeDescriptorV1.decodeError(
+                "invalid host compatibility report schema"
+            )
+        }
+        guard featureBits & ~TinyArcadeWasmFeatureSetV1.knownMask == 0 else {
+            throw TinyArcadeCartridgeDescriptorV1.decodeError(
+                "unknown host compatibility feature"
+            )
+        }
         let issueCount = Int(TinyArcadeCartridgeDescriptorV1.u16(data, 8))
         let descriptorLength = Int(TinyArcadeCartridgeDescriptorV1.u32(data, 12))
-        let descriptorEnd = 16 + descriptorLength
+        let descriptorEnd = headerLength + descriptorLength
         guard issueCount <= 72,
-              (32...(64 * 1_024 - 16)).contains(descriptorLength),
+              (32...(64 * 1_024 - headerLength)).contains(descriptorLength),
               descriptorEnd <= data.count else {
             throw TinyArcadeCartridgeDescriptorV1.decodeError(
                 "invalid host compatibility report bounds"
             )
         }
         let descriptor = try TinyArcadeCartridgeDescriptorV1.decode(
-            data.subdata(in: 16..<descriptorEnd),
+            data.subdata(in: headerLength..<descriptorEnd),
             cartridgeLength: cartridgeLength
         )
         var cursor = descriptorEnd
@@ -1985,7 +2028,11 @@ public struct TinyArcadeHostCompatibilityReportV1: Sendable {
                 "trailing host compatibility report bytes"
             )
         }
-        return Self(descriptor: descriptor, issues: issues)
+        return Self(
+            descriptor: descriptor,
+            unsupportedFeatures: TinyArcadeWasmFeatureSetV1(rawValue: featureBits),
+            issues: issues
+        )
     }
 }
 

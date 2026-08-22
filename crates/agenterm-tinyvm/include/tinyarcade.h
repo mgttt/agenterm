@@ -9,8 +9,8 @@ extern "C" {
 #endif
 
 #define TINYARCADE_ABI_MAJOR 1u
-#define TINYARCADE_ABI_MINOR 12u
-#define TINYARCADE_ABI_VERSION 0x0001000cu
+#define TINYARCADE_ABI_MINOR 13u
+#define TINYARCADE_ABI_VERSION 0x0001000du
 
 typedef struct tinyarcade_runtime_v1 tinyarcade_runtime_v1;
 typedef struct tinyarcade_trust_store_v1 tinyarcade_trust_store_v1;
@@ -221,10 +221,11 @@ tinyarcade_status_v1 tinyarcade_v1_copy_compatible_cartridge_descriptor(
     size_t capacity,
     size_t* output_len);
 
-/* ABI v1.12 returns a bounded canonical TAC1 report containing the
+/* ABI v1.13 returns a bounded canonical TAC1 schema-2 report containing the
  * profile-bound TAD1 descriptor and every unavailable or signature-mismatched
- * import. Incompatibility is report data, not a guest trap. Uses two-stage
- * copy and never instantiates or executes the cartridge. */
+ * import plus a bitmap of standard Wasm feature families unavailable in the
+ * exact TAH1 app build. Incompatibility is report data, not a guest trap. Uses
+ * two-stage copy and never instantiates or executes the cartridge. */
 tinyarcade_status_v1 tinyarcade_v1_copy_host_compatibility_report(
     const uint8_t* wasm,
     size_t wasm_len,

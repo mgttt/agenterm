@@ -92,6 +92,9 @@ pub struct GameInput {
 pub struct CartridgeDescriptor {
     pub manifest: CartridgeManifest,
     pub imports: Vec<crate::ImportDesc>,
+    /// Standard post-MVP families used by this exact cartridge. This is
+    /// inspection metadata only; parsing has already validated every opcode.
+    pub features: crate::WasmFeatureUsage,
 }
 
 impl CartridgeDescriptor {
@@ -112,9 +115,11 @@ impl CartridgeDescriptor {
                 "game cartridge does not support table imports",
             ));
         }
+        let features = module.feature_usage();
         Ok(Self {
             manifest,
             imports: module.imports().to_vec(),
+            features,
         })
     }
 }

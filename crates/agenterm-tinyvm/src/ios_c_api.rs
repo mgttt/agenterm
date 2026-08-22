@@ -761,7 +761,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 12
+    (1 << 16) | 13
 }
 
 fn append_u16(output: &mut Vec<u8>, value: usize) -> Result<(), FfiError> {
@@ -843,7 +843,7 @@ fn encode_compatibility_report(
     wasm_len: usize,
 ) -> Result<Vec<u8>, FfiError> {
     let descriptor = encode_descriptor(&report.descriptor, wasm_len)?;
-    let mut encoded_len = 16usize
+    let mut encoded_len = 20usize
         .checked_add(descriptor.len())
         .ok_or(FfiError::new(STATUS_DECODE, "compatibility report limit"))?;
     for issue in &report.issues {
@@ -863,11 +863,12 @@ fn encode_compatibility_report(
         .try_reserve_exact(encoded_len)
         .map_err(|_| FfiError::new(STATUS_DECODE, "compatibility report allocation"))?;
     encoded.extend_from_slice(b"TAC1");
-    encoded.extend_from_slice(&1u16.to_le_bytes());
-    encoded.extend_from_slice(&16u16.to_le_bytes());
+    encoded.extend_from_slice(&2u16.to_le_bytes());
+    encoded.extend_from_slice(&20u16.to_le_bytes());
     encoded.extend_from_slice(&(report.issues.len() as u16).to_le_bytes());
     encoded.extend_from_slice(&0u16.to_le_bytes());
     encoded.extend_from_slice(&descriptor_len.to_le_bytes());
+    encoded.extend_from_slice(&report.unsupported_features.bits().to_le_bytes());
     encoded.extend_from_slice(&descriptor);
     for issue in &report.issues {
         append_u16(&mut encoded, issue.module.len())?;
@@ -2568,7 +2569,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 12);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 13);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -2827,10 +2828,14 @@ mod tests {
             STATUS_OK
         );
         assert_eq!(&profile[..4], b"TAH1");
-        assert_eq!(u16::from_le_bytes([profile[4], profile[5]]), 3);
-        assert_eq!(u16::from_le_bytes([profile[6], profile[7]]), 68);
+        assert_eq!(u16::from_le_bytes([profile[4], profile[5]]), 4);
+        assert_eq!(u16::from_le_bytes([profile[6], profile[7]]), 72);
         assert_eq!(u16::from_le_bytes([profile[50], profile[51]]), 1);
         assert_eq!(u16::from_le_bytes([profile[52], profile[53]]), 1);
+        assert_eq!(
+            u32::from_le_bytes(profile[68..72].try_into().unwrap()),
+            crate::HostFeatureSetV1::current_build().bits()
+        );
         let decoded = HostProfileV1::decode(&profile).expect("decode exported host profile");
         assert_eq!(decoded.vm_limits().max_call_depth, 37);
         assert_eq!(decoded.vm_limits().max_activation_slots, 4096);
@@ -2913,12 +2918,15 @@ mod tests {
             STATUS_OK
         );
         assert_eq!(&report[..4], b"TAC1");
+        assert_eq!(u16::from_le_bytes(report[4..6].try_into().unwrap()), 2);
+        assert_eq!(u16::from_le_bytes(report[6..8].try_into().unwrap()), 20);
         assert_eq!(u16::from_le_bytes([report[8], report[9]]), 0);
         let report_descriptor_len =
             u32::from_le_bytes(report[12..16].try_into().expect("report descriptor length"))
                 as usize;
-        assert_eq!(&report[16..20], b"TAD1");
-        assert_eq!(report.len(), 16 + report_descriptor_len);
+        assert_eq!(u32::from_le_bytes(report[16..20].try_into().unwrap()), 0);
+        assert_eq!(&report[20..24], b"TAD1");
+        assert_eq!(report.len(), 20 + report_descriptor_len);
         assert_eq!(
             probe.calls.get(),
             0,
@@ -3016,7 +3024,7 @@ mod tests {
         let descriptor_len =
             u32::from_le_bytes(report[12..16].try_into().expect("report descriptor length"))
                 as usize;
-        let issue = 16 + descriptor_len;
+        let issue = 20 + descriptor_len;
         let module_len = u16::from_le_bytes([report[issue], report[issue + 1]]) as usize;
         let field_len = u16::from_le_bytes([report[issue + 2], report[issue + 3]]) as usize;
         assert_eq!(&report[issue + 4..issue + 8], &[2, 1, 1, 1]);

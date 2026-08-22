@@ -467,18 +467,28 @@ struct TinyArcadeSmoke {
             config.max_audio_bytes = 0
         }
         precondition(hostProfile.encoded.prefix(4) == Data("TAH1".utf8))
+        precondition(hostProfile.encoded[4] == 4 && hostProfile.encoded[6] == 72)
         precondition(hostProfile.encoded[36..<40].allSatisfy { $0 == 0 })
         let profileDescriptor = try hostProfile.inspectCompatibleCartridge(nativeBytes)
         precondition(profileDescriptor == descriptor)
         let compatibleReport = try hostProfile.compatibilityReport(for: nativeBytes)
         precondition(compatibleReport.isCompatible)
         precondition(compatibleReport.descriptor == descriptor)
+        precondition(compatibleReport.unsupportedFeatures.isEmpty)
         precondition(compatibleReport.issues.isEmpty)
+        let featureSet = TinyArcadeWasmFeatureSetV1(
+            rawValue: TinyArcadeWasmFeatureSetV1.bulkMemory.rawValue
+                | TinyArcadeWasmFeatureSetV1.simdSignedPCMV1.rawValue
+        )
+        precondition(featureSet.contains(.bulkMemory))
+        precondition(featureSet.contains(.simdSignedPCMV1))
+        precondition(!featureSet.contains(.referenceTypes))
         precondition(profileHandlerCalls == 0, "static profile check must not call app code")
         let coreOnlyProfile = try TinyArcadeHostProfileV1.appBuild()
         let incompatibleReport = try coreOnlyProfile.compatibilityReport(for: nativeBytes)
         precondition(!incompatibleReport.isCompatible)
         precondition(incompatibleReport.descriptor == descriptor)
+        precondition(incompatibleReport.unsupportedFeatures.isEmpty)
         precondition(
             incompatibleReport.issues == [
                 TinyArcadeHostCompatibilityIssueV1(

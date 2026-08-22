@@ -7,8 +7,8 @@ use std::rc::Rc;
 use agenterm_tinyvm::GuestResourceHandle;
 use agenterm_tinyvm::{
     CartridgeDescriptor, CartridgeManifest, CompletionError, CompletionPoll, GameFrame, GameInput,
-    GameLifecycle, GameLimits, GameRuntime, HostProfileV1, HostResourceTable, Limits,
-    MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame,
+    GameLifecycle, GameLimits, GameRuntime, HostFeatureSetV1, HostProfileV1, HostResourceTable,
+    Limits, MAX_CARTRIDGE_BYTES, MAX_NATIVE_CALLS_PER_LIFECYCLE, NativeModuleRegistry, RenderFrame,
     WasmError,
 };
 #[cfg(feature = "replay")]
@@ -791,6 +791,7 @@ fn host_profile_cli_publishes_inspects_and_checks_without_execution() {
     );
     assert!(String::from_utf8_lossy(&created.stdout).contains("schema=tinyarcade-host-profile-v1"));
     assert!(String::from_utf8_lossy(&created.stdout).contains("indexed2d_metadata_version=1"));
+    assert!(String::from_utf8_lossy(&created.stdout).contains("accepted_wasm_features="));
     let original = std::fs::read(&profile).expect("read host profile");
     assert_eq!(&original[..4], b"TAH1");
 
@@ -866,7 +867,7 @@ fn host_profile_cli_publishes_inspects_and_checks_without_execution() {
     );
     assert!(
         String::from_utf8_lossy(&rejected.stderr)
-            .contains("host profile has incompatible native imports")
+            .contains("host profile has incompatible capabilities")
     );
 }
 
@@ -1278,8 +1279,12 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
         "add native profile function",
     );
     let encoded = must_ok(profile.encode(), "encode host profile");
-    assert_eq!(u16::from_le_bytes([encoded[4], encoded[5]]), 3);
-    assert_eq!(u16::from_le_bytes([encoded[6], encoded[7]]), 68);
+    assert_eq!(u16::from_le_bytes([encoded[4], encoded[5]]), 4);
+    assert_eq!(u16::from_le_bytes([encoded[6], encoded[7]]), 72);
+    assert_eq!(
+        u32::from_le_bytes(encoded[68..72].try_into().expect("feature flags")),
+        HostFeatureSetV1::current_build().bits()
+    );
     let decoded = must_ok(HostProfileV1::decode(&encoded), "decode host profile");
     assert_eq!(must_ok(decoded.encode(), "re-encode host profile"), encoded);
     assert_eq!(decoded.native_functions().len(), 1);
@@ -1309,7 +1314,7 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
     assert_eq!(report.issues[0].available_results, None);
     assert!(matches!(
         missing.inspect_cartridge(&wasm),
-        Err(WasmError::Trap("host profile native import unavailable"))
+        Err(WasmError::Trap("host profile capability unavailable"))
     ));
     let mut wrong = must_ok(HostProfileV1::new(limits, game_limits), "wrong profile");
     must_ok(
@@ -1326,7 +1331,7 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
     assert_eq!(report.issues[0].available_results, Some(1));
     assert!(matches!(
         wrong.inspect_cartridge(&wasm),
-        Err(WasmError::Trap("host profile native import unavailable"))
+        Err(WasmError::Trap("host profile capability unavailable"))
     ));
 
     let mut two_page_wasm = wasm.clone();
@@ -1354,11 +1359,21 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
 
     let mut duplicate = encoded.clone();
     duplicate[52..54].copy_from_slice(&2u16.to_le_bytes());
-    duplicate.extend_from_slice(&encoded[68..]);
+    duplicate.extend_from_slice(&encoded[72..]);
     assert!(matches!(
         HostProfileV1::decode(&duplicate),
         Err(WasmError::Decode("host profile is not canonical"))
     ));
+
+    let mut metadata = encoded[..68].to_vec();
+    metadata[4..6].copy_from_slice(&3u16.to_le_bytes());
+    metadata[6..8].copy_from_slice(&68u16.to_le_bytes());
+    metadata.extend_from_slice(&encoded[72..]);
+    let metadata = must_ok(HostProfileV1::decode(&metadata), "decode schema-3 profile");
+    assert_eq!(
+        metadata.accepted_features().bits(),
+        HostFeatureSetV1::current_build().bits() & !HostFeatureSetV1::SIMD_SIGNED_PCM_V1
+    );
 
     let mut prior = encoded[..50].to_vec();
     prior[4..6].copy_from_slice(&2u16.to_le_bytes());
@@ -1366,7 +1381,7 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
     prior.extend_from_slice(&encoded[52..54]);
     prior.extend_from_slice(&encoded[56..64]);
     prior.extend_from_slice(&0u32.to_le_bytes());
-    prior.extend_from_slice(&encoded[68..]);
+    prior.extend_from_slice(&encoded[72..]);
     let prior = must_ok(HostProfileV1::decode(&prior), "decode schema-2 profile");
     assert!(!prior.supports_indexed2d_metadata());
     let metadata_wasm = game_module(
@@ -1388,10 +1403,17 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
     legacy[6..8].copy_from_slice(&56u16.to_le_bytes());
     legacy.extend_from_slice(&encoded[52..54]);
     legacy.extend_from_slice(&0u32.to_le_bytes());
-    legacy.extend_from_slice(&encoded[68..]);
+    legacy.extend_from_slice(&encoded[72..]);
     let legacy = must_ok(HostProfileV1::decode(&legacy), "decode schema-1 profile");
     assert_eq!(legacy.vm_limits().max_call_depth, 512);
     assert_eq!(legacy.vm_limits().max_activation_slots, 1 << 20);
+
+    let mut unknown_feature = encoded.clone();
+    unknown_feature[71] |= 0x80;
+    assert!(matches!(
+        HostProfileV1::decode(&unknown_feature),
+        Err(WasmError::Decode("unknown host profile feature"))
+    ));
 
     let mut trailing = encoded;
     trailing.push(0);
@@ -1399,6 +1421,65 @@ fn host_profile_is_canonical_and_checks_exact_standard_imports() {
         HostProfileV1::decode(&trailing),
         Err(WasmError::Decode("trailing host profile bytes"))
     ));
+}
+
+#[cfg(feature = "simd")]
+#[test]
+fn exact_host_profile_reports_simd_subset_mismatch_without_execution() {
+    let mut tick = vec![0xfd, 0x0c];
+    tick.extend_from_slice(&[0; 16]);
+    tick.extend_from_slice(&[0x1a, 0x41, 0x00, 0x0b]);
+    let wasm = game_module(&[], 1, &tick, &[]);
+    let profile = must_ok(
+        HostProfileV1::new(Limits::default(), GameLimits::default()),
+        "SIMD-capable profile",
+    );
+    let accepted = must_ok(profile.compatibility_report(&wasm), "SIMD-capable report");
+    assert!(accepted.is_compatible());
+
+    let mut encoded = must_ok(profile.encode(), "encode SIMD profile");
+    let restricted =
+        HostFeatureSetV1::current_build().bits() & !HostFeatureSetV1::SIMD_SIGNED_PCM_V1;
+    encoded[68..72].copy_from_slice(&restricted.to_le_bytes());
+    let restricted = must_ok(HostProfileV1::decode(&encoded), "decode restricted profile");
+    let report = must_ok(
+        restricted.compatibility_report(&wasm),
+        "report unsupported SIMD subset",
+    );
+    assert!(report.issues.is_empty());
+    assert_eq!(
+        report.unsupported_features.bits(),
+        HostFeatureSetV1::SIMD_SIGNED_PCM_V1
+    );
+    assert_eq!(
+        report.unsupported_features.names().collect::<Vec<_>>(),
+        ["simd-signed-pcm-v1"]
+    );
+    assert!(!report.is_compatible());
+    assert!(matches!(
+        restricted.inspect_cartridge(&wasm),
+        Err(WasmError::Trap("host profile capability unavailable"))
+    ));
+
+    let directory = tempfile::tempdir().expect("temporary feature-profile directory");
+    let cartridge = directory.path().join("simd-game.wasm");
+    let profile = directory.path().join("default-app.tahost");
+    std::fs::write(&cartridge, &wasm).expect("write SIMD cartridge");
+    std::fs::write(&profile, &encoded).expect("write restricted profile");
+    let checked = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args([
+            "cartridge",
+            "check-profile",
+            cartridge.to_str().expect("cartridge path"),
+            profile.to_str().expect("profile path"),
+        ])
+        .output()
+        .expect("run feature-aware profile check");
+    assert!(!checked.status.success());
+    let stdout = String::from_utf8_lossy(&checked.stdout);
+    assert!(stdout.contains("compatibility_issues=1"));
+    assert!(stdout.contains("issue=wasm-feature.simd-signed-pcm-v1 reason=unsupported"));
+    assert!(stdout.contains("compatible=false"));
 }
 
 #[test]

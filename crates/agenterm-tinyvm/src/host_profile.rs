@@ -8,6 +8,7 @@ use crate::wasm::{WASM_MAX_ACTIVATION_SLOTS, WASM_MAX_DEPTH};
 use crate::{
     CartridgeDescriptor, GAME_ABI_VERSION, GameLimits, Limits, MAX_CARTRIDGE_BYTES,
     MAX_NATIVE_ARITY, MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, WasmError,
+    WasmFeatureUsage,
 };
 
 const MAGIC: &[u8; 4] = b"TAH1";
@@ -15,10 +16,109 @@ const LEGACY_SCHEMA_VERSION: u16 = 1;
 const LEGACY_HEADER_LENGTH: usize = 56;
 const PRIOR_SCHEMA_VERSION: u16 = 2;
 const PRIOR_HEADER_LENGTH: usize = 64;
-const SCHEMA_VERSION: u16 = 3;
-const HEADER_LENGTH: usize = 68;
+const METADATA_SCHEMA_VERSION: u16 = 3;
+const METADATA_HEADER_LENGTH: usize = 68;
+const SCHEMA_VERSION: u16 = 4;
+const HEADER_LENGTH: usize = 72;
 const FUNCTION_HEADER_LENGTH: usize = 12;
 pub const MAX_HOST_PROFILE_BYTES: usize = 64 * 1024;
+
+/// Canonical feature families accepted by one exact app build.
+///
+/// Scalar WebAssembly is implicit. The SIMD bit deliberately names tinyvm's
+/// reviewed signed-PCM subset rather than claiming the complete SIMD proposal.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct HostFeatureSetV1(u32);
+
+impl HostFeatureSetV1 {
+    pub const BULK_MEMORY: u32 = 1 << 0;
+    pub const SIGN_EXTENSION: u32 = 1 << 1;
+    pub const NONTRAPPING_FLOAT_TO_INT: u32 = 1 << 2;
+    pub const MULTI_VALUE: u32 = 1 << 3;
+    pub const REFERENCE_TYPES: u32 = 1 << 4;
+    pub const MULTIPLE_TABLES: u32 = 1 << 5;
+    pub const MULTIPLE_MEMORIES: u32 = 1 << 6;
+    pub const EXTENDED_CONST: u32 = 1 << 7;
+    pub const TAIL_CALL: u32 = 1 << 8;
+    pub const SIMD_SIGNED_PCM_V1: u32 = 1 << 9;
+    const BASELINE: u32 = (1 << 9) - 1;
+    const KNOWN: u32 = (1 << 10) - 1;
+
+    pub const fn current_build() -> Self {
+        Self(
+            Self::BASELINE
+                | if cfg!(feature = "simd") {
+                    Self::SIMD_SIGNED_PCM_V1
+                } else {
+                    0
+                },
+        )
+    }
+
+    pub const fn bits(self) -> u32 {
+        self.0
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    pub fn names(self) -> impl Iterator<Item = &'static str> {
+        const NAMES: [(u32, &str); 10] = [
+            (HostFeatureSetV1::BULK_MEMORY, "bulk-memory"),
+            (HostFeatureSetV1::SIGN_EXTENSION, "sign-extension"),
+            (
+                HostFeatureSetV1::NONTRAPPING_FLOAT_TO_INT,
+                "nontrapping-float-to-int",
+            ),
+            (HostFeatureSetV1::MULTI_VALUE, "multi-value"),
+            (HostFeatureSetV1::REFERENCE_TYPES, "reference-types"),
+            (HostFeatureSetV1::MULTIPLE_TABLES, "multiple-tables"),
+            (HostFeatureSetV1::MULTIPLE_MEMORIES, "multiple-memories"),
+            (HostFeatureSetV1::EXTENDED_CONST, "extended-const"),
+            (HostFeatureSetV1::TAIL_CALL, "tail-call"),
+            (HostFeatureSetV1::SIMD_SIGNED_PCM_V1, "simd-signed-pcm-v1"),
+        ];
+        NAMES
+            .into_iter()
+            .filter_map(move |(bit, name)| (self.0 & bit != 0).then_some(name))
+    }
+
+    fn decode(bits: u32) -> Result<Self, WasmError> {
+        if bits & !Self::KNOWN != 0 {
+            return Err(WasmError::Decode("unknown host profile feature"));
+        }
+        Ok(Self(bits))
+    }
+
+    fn required_by(usage: WasmFeatureUsage) -> Self {
+        let mut bits = 0;
+        for (used, bit) in [
+            (usage.bulk_memory, Self::BULK_MEMORY),
+            (usage.sign_extension, Self::SIGN_EXTENSION),
+            (
+                usage.nontrapping_float_to_int,
+                Self::NONTRAPPING_FLOAT_TO_INT,
+            ),
+            (usage.multi_value, Self::MULTI_VALUE),
+            (usage.reference_types, Self::REFERENCE_TYPES),
+            (usage.multiple_tables, Self::MULTIPLE_TABLES),
+            (usage.multiple_memories, Self::MULTIPLE_MEMORIES),
+            (usage.extended_const, Self::EXTENDED_CONST),
+            (usage.tail_call, Self::TAIL_CALL),
+            (usage.simd, Self::SIMD_SIGNED_PCM_V1),
+        ] {
+            if used {
+                bits |= bit;
+            }
+        }
+        Self(bits)
+    }
+
+    fn unsupported(self, usage: WasmFeatureUsage) -> Self {
+        Self(Self::required_by(usage).0 & !self.0)
+    }
+}
 
 /// One app-compiled native function advertised by a host profile.
 #[derive(Clone, PartialEq, Eq)]
@@ -47,12 +147,13 @@ pub struct HostCompatibilityIssueV1 {
 /// profile. No guest code is instantiated or executed.
 pub struct HostCompatibilityReportV1 {
     pub descriptor: CartridgeDescriptor,
+    pub unsupported_features: HostFeatureSetV1,
     pub issues: Vec<HostCompatibilityIssueV1>,
 }
 
 impl HostCompatibilityReportV1 {
     pub fn is_compatible(&self) -> bool {
-        self.issues.is_empty()
+        self.unsupported_features.is_empty() && self.issues.is_empty()
     }
 }
 
@@ -67,6 +168,7 @@ pub struct HostProfileV1 {
     vm_limits: Limits,
     game_limits: GameLimits,
     indexed2d_metadata: bool,
+    accepted_features: HostFeatureSetV1,
     functions: Vec<HostFunctionV1>,
 }
 
@@ -77,6 +179,7 @@ impl HostProfileV1 {
             vm_limits,
             game_limits,
             indexed2d_metadata: true,
+            accepted_features: HostFeatureSetV1::current_build(),
             functions: Vec::new(),
         })
     }
@@ -95,6 +198,10 @@ impl HostProfileV1 {
 
     pub fn supports_indexed2d_metadata(&self) -> bool {
         self.indexed2d_metadata
+    }
+
+    pub fn accepted_features(&self) -> HostFeatureSetV1 {
+        self.accepted_features
     }
 
     pub fn add_native_function(
@@ -176,6 +283,7 @@ impl HostProfileV1 {
         output.extend_from_slice(&(self.vm_limits.max_call_depth as u32).to_le_bytes());
         output.extend_from_slice(&(self.vm_limits.max_activation_slots as u32).to_le_bytes());
         output.extend_from_slice(&0u32.to_le_bytes());
+        output.extend_from_slice(&self.accepted_features.bits().to_le_bytes());
         for function in &self.functions {
             output.extend_from_slice(&(function.module.len() as u16).to_le_bytes());
             output.extend_from_slice(&(function.field.len() as u16).to_le_bytes());
@@ -206,31 +314,55 @@ impl HostProfileV1 {
         }
         let schema = read_u16(bytes, 4)?;
         let header_length = read_u16(bytes, 6)? as usize;
-        let (max_call_depth, max_activation_slots, count_offset, indexed2d_metadata) =
-            match (schema, header_length) {
-                (LEGACY_SCHEMA_VERSION, LEGACY_HEADER_LENGTH) if read_u32(bytes, 52)? == 0 => {
-                    (WASM_MAX_DEPTH, WASM_MAX_ACTIVATION_SLOTS, 50, false)
-                }
-                (PRIOR_SCHEMA_VERSION, PRIOR_HEADER_LENGTH) if read_u32(bytes, 60)? == 0 => (
-                    read_u32(bytes, 52)? as usize,
+        let (
+            max_call_depth,
+            max_activation_slots,
+            count_offset,
+            indexed2d_metadata,
+            accepted_features,
+        ) = match (schema, header_length) {
+            (LEGACY_SCHEMA_VERSION, LEGACY_HEADER_LENGTH) if read_u32(bytes, 52)? == 0 => (
+                WASM_MAX_DEPTH,
+                WASM_MAX_ACTIVATION_SLOTS,
+                50,
+                false,
+                HostFeatureSetV1(HostFeatureSetV1::BASELINE),
+            ),
+            (PRIOR_SCHEMA_VERSION, PRIOR_HEADER_LENGTH) if read_u32(bytes, 60)? == 0 => (
+                read_u32(bytes, 52)? as usize,
+                read_u32(bytes, 56)? as usize,
+                50,
+                false,
+                HostFeatureSetV1(HostFeatureSetV1::BASELINE),
+            ),
+            (METADATA_SCHEMA_VERSION, METADATA_HEADER_LENGTH)
+                if read_u16(bytes, 50)? == 1
+                    && read_u16(bytes, 54)? == 0
+                    && read_u32(bytes, 64)? == 0 =>
+            {
+                (
                     read_u32(bytes, 56)? as usize,
-                    50,
-                    false,
-                ),
-                (SCHEMA_VERSION, HEADER_LENGTH)
-                    if read_u16(bytes, 50)? == 1
-                        && read_u16(bytes, 54)? == 0
-                        && read_u32(bytes, 64)? == 0 =>
-                {
-                    (
-                        read_u32(bytes, 56)? as usize,
-                        read_u32(bytes, 60)? as usize,
-                        52,
-                        true,
-                    )
-                }
-                _ => return Err(WasmError::Decode("invalid host profile header")),
-            };
+                    read_u32(bytes, 60)? as usize,
+                    52,
+                    true,
+                    HostFeatureSetV1(HostFeatureSetV1::BASELINE),
+                )
+            }
+            (SCHEMA_VERSION, HEADER_LENGTH)
+                if read_u16(bytes, 50)? == 1
+                    && read_u16(bytes, 54)? == 0
+                    && read_u32(bytes, 64)? == 0 =>
+            {
+                (
+                    read_u32(bytes, 56)? as usize,
+                    read_u32(bytes, 60)? as usize,
+                    52,
+                    true,
+                    HostFeatureSetV1::decode(read_u32(bytes, 68)?)?,
+                )
+            }
+            _ => return Err(WasmError::Decode("invalid host profile header")),
+        };
         let vm_limits = Limits {
             max_table_elems: read_u32(bytes, 16)? as usize,
             max_memory_pages: read_u32(bytes, 20)? as usize,
@@ -250,6 +382,7 @@ impl HostProfileV1 {
         let mut profile = Self::new(vm_limits, game_limits)
             .map_err(|_| WasmError::Decode("invalid host profile limits"))?;
         profile.indexed2d_metadata = indexed2d_metadata;
+        profile.accepted_features = accepted_features;
         let mut cursor = header_length;
         let mut previous: Option<(String, String)> = None;
         for _ in 0..count {
@@ -295,6 +428,7 @@ impl HostProfileV1 {
             return Err(WasmError::Decode("cartridge exceeds byte limit"));
         }
         let descriptor = CartridgeDescriptor::inspect(wasm, self.vm_limits)?;
+        let unsupported_features = self.accepted_features.unsupported(descriptor.features);
         let mut issues = Vec::new();
         if !self.indexed2d_metadata
             && descriptor.imports.iter().any(|import| {
@@ -340,14 +474,18 @@ impl HostProfileV1 {
                 available_results: available.map(|function| function.n_results),
             });
         }
-        Ok(HostCompatibilityReportV1 { descriptor, issues })
+        Ok(HostCompatibilityReportV1 {
+            descriptor,
+            unsupported_features,
+            issues,
+        })
     }
 
     /// Statically check one cartridge against this exact app-build profile.
     pub fn inspect_cartridge(&self, wasm: &[u8]) -> Result<CartridgeDescriptor, WasmError> {
         let report = self.compatibility_report(wasm)?;
         if !report.is_compatible() {
-            return Err(WasmError::Trap("host profile native import unavailable"));
+            return Err(WasmError::Trap("host profile capability unavailable"));
         }
         Ok(report.descriptor)
     }

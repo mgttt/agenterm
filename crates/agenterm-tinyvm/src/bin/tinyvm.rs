@@ -937,6 +937,12 @@ fn print_host_profile(profile: &HostProfileV1, bytes: usize) {
         "indexed2d_metadata_version={}",
         u8::from(profile.supports_indexed2d_metadata())
     );
+    let accepted_features = profile
+        .accepted_features()
+        .names()
+        .collect::<Vec<_>>()
+        .join(",");
+    println!("accepted_wasm_features={accepted_features}");
     println!("native_functions={}", profile.native_functions().len());
     for function in profile.native_functions() {
         println!(
@@ -1009,7 +1015,14 @@ fn run_cartridge_profile(cartridge_path: &str, profile_path: &str) -> ExitCode {
             println!("game_version={}", report.descriptor.manifest.game_version);
             println!("profile_bytes={profile_bytes}");
             println!("function_imports={}", report.descriptor.imports.len());
-            println!("compatibility_issues={}", report.issues.len());
+            let unsupported_features = report.unsupported_features.names().collect::<Vec<_>>();
+            println!(
+                "compatibility_issues={}",
+                report.issues.len() + unsupported_features.len()
+            );
+            for feature in unsupported_features {
+                println!("issue=wasm-feature.{feature} reason=unsupported");
+            }
             for issue in &report.issues {
                 match (issue.available_params, issue.available_results) {
                     (Some(params), Some(results)) => println!(
@@ -1028,7 +1041,7 @@ fn run_cartridge_profile(cartridge_path: &str, profile_path: &str) -> ExitCode {
                 ExitCode::SUCCESS
             } else {
                 println!("compatible=false");
-                eprintln!("tinyvm: host profile has incompatible native imports");
+                eprintln!("tinyvm: host profile has incompatible capabilities");
                 ExitCode::FAILURE
             }
         }
