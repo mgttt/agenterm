@@ -846,6 +846,27 @@ con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序
     它断言的是调度依赖的所有权窗口，归属未定，不当作既有抖动放过。
   非目标：借稳定性改动回退 unwind 或削预算纪律。
 
+- [~] **CON-oldwindows 旧 Windows 可加载性**（2026-08-22 开）— 用户报告 `agenterm-con.exe`
+  在 Windows Server 2016 上"跟不了"。不是运行期功能缺失,是 **PE 加载器在 `main` 之前拒绝**:
+  `CreatePseudoConsole` / `ResizePseudoConsole` / `ClosePseudoConsole` 是静态导入,
+  三者均始于 Windows 10 build 17763(1809),而 Server 2016 是 14393。
+  已修:`adapters/windows/pty.rs::conpty` 用 `GetModuleHandleW` + `GetProcAddress` 运行期解析,
+  缺失时由 `create_pseudo_console` 报 `ErrorKind::Unsupported` 并指名版本(而非符号名)。
+  证据:导入表实测三个符号消失;真实 ConPTY 会话单测仍通过(证明 transmute 签名正确);
+  152 条 con 测试全绿;三平台 `cargo check` 绿;体积 +2,048 B(717,824 / 1,048,575)。
+  新增 `tests/agenterm_con_load_portability.rs` 直接解析产物导入表钉住这一类:
+  该门做过反向对照(把一个确实被导入的符号加进禁列 → 立即变红),不是空断言。
+  **仍未关**:
+  - `VCRUNTIME140.dll` 仍是动态依赖(`mem*` 四个 + `__CxxFrameHandler3` / `_CxxThrowException`),
+    干净的 Server 2016 不自带,需装 VC++ 运行库。已在门里记为 `KNOWN_NON_OS_MODULES`,
+    保证它可见、且不能被用来放行新的非 OS 依赖。
+    改静态不是加个 flag:con 自带 PE 入口(`startup.rs`)不跑静态 CRT 的
+    `__security_init_cookie` / `__vcrt_initialize`,`static=libvcruntime` 能链但首个测试即
+    `STATUS_STACK_BUFFER_OVERRUN`(已实测,基线同命令 125 全绿,归属确定)。
+    要么让 `startup.rs` 接管这两个初始化,要么把 DLL 随产物分发——属交付链决策,未擅自定。
+  - 未在真实 Server 2016 上验证过。以上是导入表推导 + 本机等价验证,不是目标机实测。
+  - 同一缺陷也存在于 `agenterm.exe`(共用该 adapter,已随之修复),但它没有对应的加载性门。
+
 ### 轨 C Gate
 
 | Gate | 必须证明 | 不通过时 |

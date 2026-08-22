@@ -33,6 +33,10 @@ path = "tests/agenterm_con_throughput.rs"
 name = "agenterm_con_accessibility_linux"
 path = "tests/agenterm_con_accessibility_linux.rs"
 
+[[test]]
+name = "agenterm_con_load_portability"
+path = "tests/agenterm_con_load_portability.rs"
+
 [dependencies]
 agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["clipboard", "filesystem-publish", "filesystem-read", "font", "ime", "ipc", "parent-console", "pty", "runtime", "screenshot", "window"] }
 agenterm-ui-core = { path = "../agenterm-ui-core", features = ["terminal-selection"] }
@@ -50,6 +54,12 @@ agenterm-platform = { path = "../agenterm-platform", default-features = false, f
 
 [target.'cfg(windows)'.dependencies]
 agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["native-pixel-window"] }
+
+# Reads the shipped PE's import table so a static import of an API the
+# oldest supported Windows lacks cannot silently return. Same parser as
+# agenterm-abi's export gate: pure Rust, no dumpbin on PATH.
+[target.'cfg(windows)'.dev-dependencies]
+object = { version = "0.39.1", default-features = false, features = ["read", "std"] }
 
 [target.'cfg(unix)'.dependencies]
 agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["portable-pixel-window"] }

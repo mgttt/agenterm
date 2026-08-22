@@ -87,6 +87,7 @@ dependencies = [
  "agenterm-platform",
  "agenterm-ui-core",
  "itoa",
+ "object",
  "png",
  "serde_json",
  "unicode-width",

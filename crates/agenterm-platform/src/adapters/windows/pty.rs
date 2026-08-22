@@ -27,9 +27,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
 };
 use windows_sys::Win32::System::Console::{
-    COORD, ClosePseudoConsole, CreatePseudoConsole, ENABLE_LINE_INPUT,
-    ENABLE_VIRTUAL_TERMINAL_INPUT, GetConsoleMode, HPCON, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT,
-    KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, ResizePseudoConsole, SetConsoleCtrlHandler,
+    COORD, ENABLE_LINE_INPUT, ENABLE_VIRTUAL_TERMINAL_INPUT, GetConsoleMode, HPCON, INPUT_RECORD,
+    INPUT_RECORD_0, KEY_EVENT, KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, SetConsoleCtrlHandler,
     WriteConsoleInputW,
 };
 use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
@@ -76,9 +75,140 @@ const PSEUDOCONSOLE_RESIZE_QUIRK: u32 = 0x2;
 const PSEUDOCONSOLE_WIN32_INPUT_MODE: u32 = 0x4;
 const PSEUDOCONSOLE_PASSTHROUGH_MODE: u32 = 0x8;
 const PASSTHROUGH_MIN_BUILD: u32 = 22_621;
+/// The build that first exported the ConPTY entry points from `kernel32`
+/// (Windows 10 1809). Older supported systems — Windows Server 2016 is build
+/// 14393 and still in support — export none of the three.
+const CONPTY_MIN_BUILD: u32 = 17_763;
 const DSR_BOOTSTRAP_TIMEOUT: Duration = Duration::from_millis(200);
 
 static NEXT_CONPTY_PIPE_ID: AtomicU64 = AtomicU64::new(1);
+
+/// The ConPTY entry points, resolved at run time rather than imported.
+///
+/// `CreatePseudoConsole` and its two companions arrived in Windows 10 1809.
+/// A static import of them is not a statement about this adapter — it is a
+/// statement about the whole executable, because the PE loader resolves every
+/// import before `main` runs. On Windows Server 2016 that turns "the terminal
+/// cannot open a PTY tab" into "the program refuses to start", with an
+/// entry-point dialog naming a symbol the user has no way to act on.
+///
+/// Resolving through `GetProcAddress` moves the failure to the one call that
+/// needs the feature, where it can be reported as an ordinary unsupported
+/// operation. `kernel32` is loaded into every process, so `GetModuleHandleW`
+/// borrows the existing reference and there is nothing to free.
+mod conpty {
+    use super::{CONPTY_MIN_BUILD, COORD, HPCON};
+    use std::sync::OnceLock;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+
+    /// Named so each `transmute` states the exact signature it is producing
+    /// rather than inferring one from the field it lands in.
+    type Create = unsafe extern "system" fn(COORD, HANDLE, HANDLE, u32, *mut HPCON) -> i32;
+    type Resize = unsafe extern "system" fn(HPCON, COORD) -> i32;
+    type Close = unsafe extern "system" fn(HPCON);
+    /// What `GetProcAddress` hands back once the `Option` is unwrapped: a
+    /// signature-less pointer that carries no information about the export.
+    type Resolved = unsafe extern "system" fn() -> isize;
+
+    struct Entries {
+        create: Create,
+        resize: Resize,
+        close: Close,
+    }
+
+    /// `None` records a system without ConPTY. Resolution is attempted once:
+    /// a missing export does not become available later in the process.
+    static ENTRIES: OnceLock<Option<Entries>> = OnceLock::new();
+
+    fn entries() -> Option<&'static Entries> {
+        ENTRIES.get_or_init(resolve).as_ref()
+    }
+
+    fn resolve() -> Option<Entries> {
+        let name = "kernel32.dll\0".encode_utf16().collect::<Vec<_>>();
+        // SAFETY: the name is NUL terminated. GetModuleHandleW borrows the
+        // loader's reference to an already-loaded module without adding one,
+        // so the returned handle must not be freed.
+        let module = unsafe { GetModuleHandleW(name.as_ptr()) };
+        if module.is_null() {
+            return None;
+        }
+        // All three or none: a system exporting only part of the trio is not
+        // one this adapter knows how to drive, and partial use would trade a
+        // load-time failure for a null call.
+        // SAFETY: `module` is live for the process lifetime and each name is a
+        // NUL-terminated C string. Every transmute target below is the exact
+        // documented signature of the export being resolved.
+        unsafe {
+            Some(Entries {
+                create: std::mem::transmute::<Resolved, Create>(GetProcAddress(
+                    module,
+                    c"CreatePseudoConsole".as_ptr().cast(),
+                )?),
+                resize: std::mem::transmute::<Resolved, Resize>(GetProcAddress(
+                    module,
+                    c"ResizePseudoConsole".as_ptr().cast(),
+                )?),
+                close: std::mem::transmute::<Resolved, Close>(GetProcAddress(
+                    module,
+                    c"ClosePseudoConsole".as_ptr().cast(),
+                )?),
+            })
+        }
+    }
+
+    /// Whether this system can host a pseudoconsole at all. Production code
+    /// never asks in advance — it calls and handles the refusal — so this
+    /// exists only for the test that pins resolution to the OS build.
+    #[cfg(test)]
+    pub(super) fn is_available() -> bool {
+        entries().is_some()
+    }
+
+    /// Explains the refusal in terms the reader can act on: a version, not a
+    /// symbol name.
+    pub(super) fn unavailable_reason() -> String {
+        format!(
+            "this Windows build does not export ConPTY; a pseudoconsole needs \
+             Windows 10 build {CONPTY_MIN_BUILD} (1809) or Windows Server 2019 or newer"
+        )
+    }
+
+    /// `None` means ConPTY is absent; `Some` carries the export's `HRESULT`.
+    ///
+    /// # Safety
+    /// The caller upholds `CreatePseudoConsole`'s contract: both handles are
+    /// live for the call and `hpc` is a valid out-pointer.
+    pub(super) unsafe fn create(
+        size: COORD,
+        input: HANDLE,
+        output: HANDLE,
+        flags: u32,
+        hpc: *mut HPCON,
+    ) -> Option<i32> {
+        let create = entries()?.create;
+        Some(unsafe { create(size, input, output, flags, hpc) })
+    }
+
+    /// # Safety
+    /// `hpc` is a live pseudoconsole the caller keeps alive across this call.
+    pub(super) unsafe fn resize(hpc: HPCON, size: COORD) -> Option<i32> {
+        let resize = entries()?.resize;
+        Some(unsafe { resize(hpc, size) })
+    }
+
+    /// # Safety
+    /// `hpc` is a live pseudoconsole and is not used again afterwards.
+    pub(super) unsafe fn close(hpc: HPCON) {
+        // Unreachable without a live HPCON, which only `create` produces and
+        // only on a system where resolution already succeeded. Skipping is
+        // still the correct response: there is no close function to call.
+        if let Some(entries) = entries() {
+            unsafe { (entries.close)(hpc) };
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct WindowsConsoleKeyEvent {
@@ -576,8 +706,12 @@ impl ConptySession {
         let result = unsafe {
             // SAFETY: the lock keeps the sole close authority from consuming
             // hpc through this call, and coord has been range checked.
-            ResizePseudoConsole(hpc, coord)
+            conpty::resize(hpc, coord)
         };
+        // Holding a live HPCON means resolution already succeeded, so `None`
+        // cannot occur here; treat it as the same benign no-op as a resize
+        // that raced teardown rather than inventing a failure.
+        let Some(result) = result else { return Ok(()) };
         if result != S_OK {
             if is_benign_resize_after_exit(result) {
                 return Ok(());
@@ -610,7 +744,7 @@ impl ConptySession {
             // SAFETY: take_hpc is the sole transfer point for the live HPCON;
             // this call consumes no Rust-owned memory and is idempotent because
             // subsequent callers observe None.
-            unsafe { ClosePseudoConsole(hpc) };
+            unsafe { conpty::close(hpc) };
         }
     }
 }
@@ -1232,13 +1366,21 @@ fn create_pseudo_console(
     let result = unsafe {
         // SAFETY: both pipe handles are live and borrowed for this call;
         // coord was range checked and hpc is a valid out-pointer.
-        CreatePseudoConsole(
+        conpty::create(
             coord,
             input.as_raw_handle() as HANDLE,
             output.as_raw_handle() as HANDLE,
             flags,
             &mut hpc,
         )
+    };
+    // The one place an absent ConPTY becomes visible: an ordinary refusal from
+    // the operation that needs it, rather than a loader error before `main`.
+    let Some(result) = result else {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            conpty::unavailable_reason(),
+        ));
     };
     if result != S_OK {
         return Err(hresult_error(result));
@@ -1266,7 +1408,7 @@ impl Drop for HpcOwner {
             // Construction failures drop pipe readers before reaching this
             // point; normal sessions use ConptySession::close as the single
             // idempotent close authority instead.
-            unsafe { ClosePseudoConsole(hpc) };
+            unsafe { conpty::close(hpc) };
         }
     }
 }
@@ -2495,6 +2637,34 @@ mod tests {
         );
         assert_eq!(select_conpty_flags(None, false), 0x6);
         assert_eq!(select_conpty_flags(Some(PASSTHROUGH_MIN_BUILD), true), 0x6);
+    }
+
+    /// The load-time-to-call-time move is only real if the run-time lookup
+    /// actually finds the exports where a static import would have. Agreeing
+    /// with the OS build number in both directions proves the lookup works on
+    /// a system that has ConPTY, and — on an older host — that the adapter
+    /// reports absence instead of calling through a null pointer.
+    #[test]
+    fn conpty_resolution_agrees_with_the_reported_windows_build() {
+        let build = super::current_windows_build().expect("Windows reports its build");
+        assert_eq!(
+            super::conpty::is_available(),
+            build >= super::CONPTY_MIN_BUILD,
+            "ConPTY availability must track build {build}, not a static import"
+        );
+    }
+
+    /// A refusal that names a symbol is unactionable; one that names a version
+    /// tells the reader what to do about it.
+    #[test]
+    fn an_absent_conpty_is_explained_as_a_windows_version_requirement() {
+        let reason = super::conpty::unavailable_reason();
+        assert!(reason.contains("17763"), "the required build is named");
+        assert!(reason.contains("1809"), "the marketing name is named");
+        assert!(
+            !reason.contains("CreatePseudoConsole"),
+            "a bare export name is what this change exists to stop showing users"
+        );
     }
 
     #[test]
