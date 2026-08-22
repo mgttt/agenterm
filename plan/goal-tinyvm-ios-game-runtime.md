@@ -4817,3 +4817,35 @@ Release build while consuming the byte-identical ABI v1.13 archive (SHA-256
 `582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`).
 Physical-iPhone lifecycle, memory, performance and audio plus TestFlight
 install/play evidence remain open, so the persistent goal stays active.
+
+## One-hundred-fifty-sixth executable increment — exact current-runtime TestFlight candidate
+
+The P0 audit rejected build 37 as final runtime evidence before asking the owner
+to play it: that candidate used an older tinyvm revision and therefore could
+not qualify current main. Nostalgia Arcade `0.16.4 (38)` now binds source commit
+`0f229da577693542c93b689f9b05eee84f294889` to tinyvm commit
+`f5b8da389cdc28c346e0c644af022cf1d8df82d8` and the exact ABI v1.13 arm64
+archive SHA-256
+`582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`.
+The 13 real-App cartridge tests, two-game UI journey, generic arm64 Release
+build and exact signed-archive audit pass before upload.
+
+The resulting archive contains only the 6,116-byte Depth Well and 6,040-byte
+Signal Lock standard WASM cartridges. Its post-upload content-tree SHA-256 is
+`6c28fa94702f753bf337b03c21b1b41c2ec5475d616a4f1f392e58fc714bdc85`,
+and dSYM UUID is `280D5570-1FAE-3ED3-AC44-C521464575D1`. Xcode's App Store
+Connect package and SPI analysis completed without warnings or errors; upload
+identifier `41a60095-1a65-45e7-b001-8eb45dad8186` entered Apple processing at
+`2026-08-22T08:41:58Z`.
+
+The consumer now owns a separate pre-development-test identity gate. It reads
+the supported `devicectl` JSON application record, requires bundle
+`com.partnernetsoftware.nostalgiaarcade`, exact version/build, and
+`builtByDeveloper == false`, writes a normalized evidence manifest, then
+launches that installed distribution package. Its offline black box accepts
+the current build 38 fixture and rejects a stale build, developer install and
+missing App; the live path fails closed when no physical device is connected.
+This proves the evidence workflow and current upload identity, not Apple-side
+availability or physical behavior. Processing/install, lifecycle, memory,
+frame-time, input and audio evidence therefore remain open and the persistent
+goal stays active.

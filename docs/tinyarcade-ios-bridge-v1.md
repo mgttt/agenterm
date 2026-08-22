@@ -569,6 +569,19 @@ failing the cartridge. The App no longer maintains a wrapping parallel clock.
 This closes current-main App consumption, not
 the separate physical-iPhone lifecycle and performance requirement.
 
+The current-runtime TestFlight candidate is Nostalgia Arcade `0.16.4 (38)`.
+Its exact source consumes the ABI v1.13 arm64 archive with SHA-256
+`582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`;
+the signed, two-cartridge arm64 archive passed the same physical-surface audit
+and Xcode uploaded it successfully for Apple processing. Before a development
+device test can replace the installed App, the consumer's
+`scripts/verify-testflight-install.sh` reads `devicectl`'s supported JSON
+interface, requires the exact bundle/version/build, rejects an Xcode-installed
+developer build, retains identity evidence and launches the verified
+distribution package. Fixture black boxes accept build 38 and reject a wrong
+build, developer install and missing App. Apple processing/installability and
+all physical-device behavior remain unproven until that command sees a device.
+
 Rust black-box tests drive the C handle through bundled/private/reviewed open,
 exact native registration, callback success/failure and failed-instance latch,
 signature and revocation, origin query, tick, frame copy,
