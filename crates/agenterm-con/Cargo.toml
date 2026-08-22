@@ -37,6 +37,10 @@ path = "tests/agenterm_con_accessibility_linux.rs"
 name = "agenterm_con_load_portability"
 path = "tests/agenterm_con_load_portability.rs"
 
+[[test]]
+name = "agenterm_con_console_agent"
+path = "tests/agenterm_con_console_agent.rs"
+
 [dependencies]
 agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["clipboard", "filesystem-publish", "filesystem-read", "font", "ime", "ipc", "parent-console", "pty", "runtime", "screenshot", "window"] }
 agenterm-ui-core = { path = "../agenterm-ui-core", features = ["terminal-selection"] }
@@ -60,6 +64,9 @@ agenterm-platform = { path = "../agenterm-platform", default-features = false, f
 # agenterm-abi's export gate: pure Rust, no dumpbin on PATH.
 [target.'cfg(windows)'.dev-dependencies]
 object = { version = "0.39.1", default-features = false, features = ["read", "std"] }
+# The console-agent journeys read the host's own failure log when a backend
+# assertion fails, so a red test says why and not only that.
+agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["runtime"] }
 
 [target.'cfg(unix)'.dependencies]
 agenterm-platform = { path = "../agenterm-platform", default-features = false, features = ["portable-pixel-window"] }

@@ -795,6 +795,10 @@ pub(crate) mod runtime;
 #[path = "adapters/windows/pty.rs"]
 pub(crate) mod pty;
 
+#[cfg(all(feature = "pty", windows))]
+#[path = "adapters/windows/console_agent.rs"]
+pub(crate) mod console_agent;
+
 #[cfg(all(feature = "pty", target_os = "linux"))]
 #[path = "adapters/linux/pty.rs"]
 pub(crate) mod pty;

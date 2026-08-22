@@ -394,6 +394,15 @@ fn main() {
         }
     };
 
+    // Before anything else, including argument parsing. On a Windows build
+    // without a pseudoconsole this binary re-executes itself to host a
+    // child's hidden console; in that mode the process is not the terminal,
+    // it only shares the file, and must not open a window or a control
+    // endpoint.
+    if let Some(code) = agenterm_platform::pty::run_if_console_agent(&args) {
+        std::process::exit(code);
+    }
+
     if let Some(code) = offline_cli_exit(&args) {
         std::process::exit(code);
     }

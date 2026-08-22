@@ -6,6 +6,27 @@ pub use crate::contract::pty::{
 };
 pub use crate::selected::pty::{ChildCommand, PtyChild, PtyMaster, login_shell_argument};
 
+/// Runs the pre-ConPTY console agent if these arguments ask for it.
+///
+/// On Windows builds without a pseudoconsole this executable re-executes
+/// itself to host the child's hidden console (see the console agent adapter).
+/// A binary that opens PTYs must call this before parsing its own arguments
+/// and exit with the returned code: in agent mode the process is not the
+/// product, it only shares the file. `None` means these are ordinary
+/// arguments. Always `None` off Windows.
+#[must_use]
+pub fn run_if_console_agent(arguments: &[String]) -> Option<i32> {
+    #[cfg(windows)]
+    {
+        crate::selected::console_agent::run_if_agent(arguments)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = arguments;
+        None
+    }
+}
+
 const PTY_SHUTDOWN_QUEUE_CAPACITY: usize = 64;
 
 struct PtyShutdown {

@@ -877,7 +877,7 @@ con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序
   关键是 `/ENTRY` 下必须自己调 `__vcrt_initialize`;**`__security_init_cookie` 经负对照
   证明不需要加**(`.CRT$XI*` 里已有)。可加载性门的例外清单现已清空。
 
-- [ ] **CON-oldpty 旧 Windows 的 PTY 后端**（2026-08-22 开）— 加载好了,但 Server 2016
+- [x] **CON-oldpty 旧 Windows 的 PTY 后端**（2026-08-22 开）— 加载好了,但 Server 2016
   没有 ConPTY,终端开不出标签页。方向已定:**按能力自适应选择后端**。
   - **微软 ConPTY 重发行包救不了**:`Microsoft.Windows.Console.ConPTY`(wezterm 打包的
     `conpty.dll` + `OpenConsole.exe`)官方写明支持 `10.0.17763.0 及以上`——与内置 API 同一
@@ -897,8 +897,21 @@ con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序
       符合"不依赖非原生东西"的方向。
     - **后端差异必须封死在 `PtySession` 字节流契约之下**:agent 负责把缓冲区差异合成 VT,
       adapter 之上的任何代码都不应知道跑的是哪个后端。
-  - **未做**:实现本身。这是一个真实子系统(winpty 本体约 10k 行 C++;我们因为两端自控可以小得多,
-    但仍是 ~1k 行量级 + 测试),不是一次改动能收口的。
+  **已实现并验证(2026-08-22)**:`adapters/windows/console_agent.rs`。
+  - 按能力选后端(`conpty::is_available()`),`AGENTERM_FORCE_CONSOLE_AGENT=1` 可在新系统上
+    强制走旧后端——否则这条路只有旧机器能跑到,等于没有覆盖。
+  - agent = `agenterm-con` 自身 re-exec(`--agenterm-console-agent`),无第三方二进制。
+    `agenterm.exe` 也接了同一入口。
+  - 差异封死在 `PtySession` 字节流之下:复用同一套管道、同一个 output pump、
+    同一份命令行与环境块,只有"谁创建子进程"不同。
+  - 证据:6 条真实 journey(启动/输入往返/resize 存活/宽字符不重复/宿主关闭不留孤儿/
+    参数两端一致)+ 19 条单测全绿;131 con 单测、23 GUI 黑盒、对齐门、可加载性门全绿;
+    clippy `-D warnings` 干净;三平台 `cargo check` 绿;产物 770,048 / 1,048,575 字节。
+  - 实现期踩到并已修的真坑:ConPTY 路径的管道句柄**不可继承**(它直接把句柄交给
+    `CreatePseudoConsole`,从不需要继承),agent 继承不到只表现为第一次读的
+    `ERROR_INVALID_HANDLE`;控制线程直接改控制台尺寸会与轮询线程的 `ReadConsoleOutputW`
+    抢占,读失败一次就把 agent 弄死——已改为控制线程只记录、轮询线程应用,且单次读失败不致命。
+  - **仍未在真实 Server 2016 上验证**:本机是 Server 2022,以上全部走强制开关。
   **仍未关**:
   - `agenterm.exe` 共用该 adapter,ConPTY 修复随之生效,但它没有对应的加载性门,
     也没有静态 CRT 改动(`build.rs` 是 con 独有的)。

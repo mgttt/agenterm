@@ -55,6 +55,8 @@ use crate::contract::pty::{
     NativeInputOwnership, NativeTerminalKey, ProcessId, PtyError, PtyResult, TerminalSize,
 };
 
+use super::console_agent;
+
 /// Windows shells do not accept the POSIX login-shell argument.
 pub fn login_shell_argument(
     _program: &std::path::Path,
@@ -158,10 +160,9 @@ mod conpty {
         }
     }
 
-    /// Whether this system can host a pseudoconsole at all. Production code
-    /// never asks in advance — it calls and handles the refusal — so this
-    /// exists only for the test that pins resolution to the OS build.
-    #[cfg(test)]
+    /// Whether this system can host a pseudoconsole at all. The spawn path
+    /// asks before choosing a backend; every other caller should simply call
+    /// through and handle the refusal.
     pub(super) fn is_available() -> bool {
         entries().is_some()
     }
@@ -266,6 +267,13 @@ impl ChildCommand {
 
     pub fn spawn(self) -> PtyResult<SpawnedPty> {
         let size = self.size.unwrap_or(DEFAULT_TERMINAL_SIZE);
+        // Selected by capability, not by build number: a system either
+        // exports the pseudoconsole entry points or it does not, and that is
+        // the only fact this decision depends on. The build number is for the
+        // message a user reads, never for the branch.
+        if !conpty::is_available() || force_console_agent() {
+            return spawn_through_console_agent(self, size);
+        }
         let dsr_bootstrap = should_enable_dsr_bootstrap(&self.program);
         let mut session = create_session(size, dsr_bootstrap)
             .map_err(|error| pty_error("spawn", "pty_spawn_failed", error))?;
@@ -672,8 +680,18 @@ fn key_input_record(key: WindowsConsoleKeyEvent, key_down: bool) -> INPUT_RECORD
 }
 
 #[derive(Debug)]
+/// One terminal session, whichever backend is providing it.
+///
+/// The name is historical: on a system with ConPTY this owns an `HPCON`, and
+/// on one without it owns an agent process that emulates one. Both speak the
+/// same two pipes, so everything outside this file is identical either way —
+/// which is the property that keeps the fallback from leaking into the
+/// terminal.
 struct ConptySession {
+    /// `Some` only for the ConPTY backend.
     hpc: Mutex<Option<HPCON>>,
+    /// `Some` only for the agent backend: the pipe that carries resizes.
+    agent: Option<Mutex<Option<OwnedHandle>>>,
     output: Arc<OutputPipe>,
     input: Arc<InputWriter>,
     passthrough: bool,
@@ -693,6 +711,15 @@ impl ConptySession {
 
     fn resize(&self, size: TerminalSize) -> io::Result<()> {
         let coord = coord_from_size(size)?;
+        if let Some(agent) = &self.agent {
+            let guard = agent.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            // A resize racing teardown is benign here for the same reason it
+            // is below: the session is going away and the new size with it.
+            let Some(control) = guard.as_ref() else {
+                return Ok(());
+            };
+            return console_agent::request_resize(control, size.cols, size.rows);
+        }
         let guard = self
             .hpc
             .lock()
@@ -740,6 +767,13 @@ impl ConptySession {
         // never waits on the product's bounded consumer queue.
         self.input.close();
         self.output.begin_drain();
+        if let Some(agent) = &self.agent {
+            // Dropping the control pipe is what ends the agent's control
+            // thread. The agent itself exits with its child, and the host's
+            // Job Object is the authority that kills both if it does not.
+            let mut guard = agent.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            drop(guard.take());
+        }
         if let Some(hpc) = self.take_hpc() {
             // SAFETY: take_hpc is the sole transfer point for the live HPCON;
             // this call consumes no Rust-owned memory and is idempotent because
@@ -1350,6 +1384,7 @@ fn create_session_with_flags(
     let passthrough = flags & PSEUDOCONSOLE_PASSTHROUGH_MODE != 0;
     Ok(Arc::new(ConptySession {
         hpc: Mutex::new(Some(hpc.into_raw())),
+        agent: None,
         output,
         input,
         passthrough,
@@ -1592,6 +1627,101 @@ impl Drop for SuspendedProcess {
             };
         }
     }
+}
+
+/// Selects the pre-ConPTY backend on a machine that has ConPTY.
+///
+/// Without this the fallback could only ever be exercised on a system old
+/// enough to need it, which is neither CI nor any developer's machine — the
+/// exact shape that let the original load-time defect ship. Reading the
+/// environment on every spawn is deliberate: a cached answer could not be
+/// changed between the tests in one process.
+fn force_console_agent() -> bool {
+    env::var_os("AGENTERM_FORCE_CONSOLE_AGENT").is_some_and(|value| value == "1")
+}
+
+/// The pre-ConPTY path: an agent process stands in for the pseudoconsole.
+///
+/// Deliberately built from the same pieces as the ConPTY path — the same
+/// pipes, the same output pump, the same command line and environment block —
+/// so the two backends cannot drift into starting a child from different
+/// inputs. What differs is only who creates the child: here the agent does,
+/// because the child must be born attached to the agent's hidden console.
+fn spawn_through_console_agent(command: ChildCommand, size: TerminalSize) -> PtyResult<SpawnedPty> {
+    let job = JobObjectGuard::new()
+        .map_err(|error| pty_error("create job", "pty_job_create_failed", error))?;
+    let input = create_input_pipe(PIPE_BUFFER_SIZE)
+        .map_err(|error| pty_error("spawn", "pty_spawn_failed", error))?;
+    let output = create_output_pipe(PIPE_BUFFER_SIZE)
+        .map_err(|error| pty_error("spawn", "pty_spawn_failed", error))?;
+
+    let child_command_line =
+        command_line(&command).map_err(|error| pty_error("spawn", "pty_spawn_failed", error))?;
+    let environment = environment_block(&command)
+        .map_err(|error| pty_error("spawn", "pty_spawn_failed", error))?;
+    let current_dir = command
+        .current_dir
+        .as_ref()
+        .map(|path| wide_null(path.as_os_str()))
+        .transpose()
+        .map_err(|error| pty_error("spawn", "pty_spawn_failed", error))?;
+
+    let agent = console_agent::spawn_agent(
+        &input.read,
+        &output.write,
+        &child_command_line,
+        environment.as_deref(),
+        current_dir.as_deref(),
+        size.cols,
+        size.rows,
+    )
+    .map_err(|error| pty_error("spawn", "pty_spawn_failed", error))?;
+
+    // The agent owns duplicates of both endpoints now; the host keeps only
+    // the writer it feeds and the reader it drains, exactly as with ConPTY.
+    drop(input.read);
+    drop(output.write);
+
+    let writer = InputWriter::new(input.write)
+        .map_err(|error| pty_error("spawn", "pty_spawn_failed", error))?;
+    let session = Arc::new(ConptySession {
+        hpc: Mutex::new(None),
+        agent: Some(Mutex::new(Some(agent.control))),
+        output: Arc::new(OutputPipe::new()),
+        input: Arc::new(writer),
+        // The agent emits the sequences it decides to emit; there is no
+        // passthrough mode to inherit from a pseudoconsole.
+        passthrough: false,
+    });
+    if let Err(error) = spawn_output_pump(
+        output.read,
+        Arc::clone(&session.output),
+        Arc::clone(&session.input),
+        None,
+    ) {
+        session.close();
+        return Err(pty_error("spawn", "pty_spawn_failed", error));
+    }
+
+    // The agent is the process the host waits on and kills: it exits with its
+    // child's status, and its own job kills the child if the host kills it.
+    let pid = ProcessId::new(agent.pid)
+        .map_err(|error| pty_error("spawn", "pty_spawn_failed", io::Error::other(error)))?;
+    if let Err(error) = job.assign(&agent.process) {
+        session.close();
+        return Err(pty_error("spawn", "pty_job_assign_failed", error));
+    }
+    Ok(SpawnedPty {
+        master: PtyMaster {
+            session: Arc::clone(&session),
+        },
+        child: PtyChild {
+            process: agent.process,
+            job: Some(job),
+            session,
+            pid,
+        },
+    })
 }
 
 fn resume_as_child(

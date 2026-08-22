@@ -45,6 +45,19 @@ fn main() -> std::process::ExitCode {
     if agenterm::incremental_wrapper::is_incremental_rustc_wrapper_process(&os_args) {
         agenterm::incremental_wrapper::run_incremental_rustc_wrapper(os_args);
     }
+    // On a Windows build without a pseudoconsole, this executable re-executes
+    // itself to host a child's hidden console. That mode shares the file but
+    // is not this program, so it has to answer before any other dispatch.
+    // Lossy conversion is safe for this probe alone: the agent's own
+    // arguments are ASCII by construction, so a non-UTF-8 argument elsewhere
+    // can only fail to match.
+    let agent_args = os_args
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    if let Some(code) = agenterm_platform::pty::run_if_console_agent(&agent_args) {
+        return std::process::ExitCode::from(code.clamp(0, 255) as u8);
+    }
     // `--internal-incremental-finalize` is invoked directly (not through
     // cargo/`RUSTC_WRAPPER`) by the build script, using the same stable
     // wrapper executable — see `finalize_incremental_manifest`'s callers.
