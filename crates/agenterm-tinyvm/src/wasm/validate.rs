@@ -421,7 +421,9 @@ fn step(v: &mut V<'_>, op: &Op) -> Result<(), WasmError> {
             v.push(V128);
         }
         #[cfg(feature = "simd")]
-        V128And | V128AndNot | V128Or | V128Xor | I16x8AddSatS | I16x8SubSatS => {
+        V128And | V128AndNot | V128Or | V128Xor | I8x16Add | I8x16Sub | I16x8Add | I16x8Sub
+        | I16x8Mul | I16x8AddSatS | I16x8SubSatS | I32x4Add | I32x4Sub | I32x4Mul | I64x2Add
+        | I64x2Sub | I64x2Mul => {
             v.pop_expect(V128)?;
             v.pop_expect(V128)?;
             v.push(V128);

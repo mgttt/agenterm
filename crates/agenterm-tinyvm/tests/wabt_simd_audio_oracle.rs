@@ -52,9 +52,52 @@ fn expected_logic() -> [[u8; 16]; 6] {
     })
 }
 
+fn expected_lanes() -> [[u8; 16]; 11] {
+    const OPERATIONS: [(usize, u8); 11] = [
+        (1, 0),
+        (1, 1),
+        (2, 0),
+        (2, 1),
+        (2, 2),
+        (4, 0),
+        (4, 1),
+        (4, 2),
+        (8, 0),
+        (8, 1),
+        (8, 2),
+    ];
+    core::array::from_fn(|operation| {
+        let (width, arithmetic) = OPERATIONS[operation];
+        let mask = if width == 8 {
+            u64::MAX
+        } else {
+            (1_u64 << (width * 8)) - 1
+        };
+        let mut vector = [0; 16];
+        for start in (0..16).step_by(width) {
+            let mut left = 0_u64;
+            let mut right = 0_u64;
+            for byte in 0..width {
+                left |= u64::from(LOGIC_LEFT[start + byte]) << (byte * 8);
+                right |= u64::from(LOGIC_RIGHT[start + byte]) << (byte * 8);
+            }
+            let value = match arithmetic {
+                0 => left.wrapping_add(right),
+                1 => left.wrapping_sub(right),
+                2 => left.wrapping_mul(right),
+                _ => unreachable!(),
+            } & mask;
+            for byte in 0..width {
+                vector[start + byte] = (value >> (byte * 8)) as u8;
+            }
+        }
+        vector
+    })
+}
+
 #[test]
 #[ignore = "run through smoke-wabt-simd-audio.sh with an independently compiled fixture"]
-fn wabt_compiled_simd_audio_and_masks_match_tinyvm() {
+fn wabt_compiled_simd_game_kernels_match_tinyvm() {
     let path = PathBuf::from(
         std::env::var_os("TINYVM_WABT_SIMD_WASM")
             .expect("TINYVM_WABT_SIMD_WASM is set by the smoke script"),
@@ -138,12 +181,28 @@ fn wabt_compiled_simd_audio_and_masks_match_tinyvm() {
         .as_slice(),
         [Val::I32(0)]
     ));
+
+    {
+        let mut memory = must(instance.memory_mut(), "borrow SIMD lane memory");
+        memory[0..16].copy_from_slice(&LOGIC_LEFT);
+        memory[16..32].copy_from_slice(&LOGIC_RIGHT);
+        memory[256..432].fill(0);
+    }
+    must(
+        instance.invoke_by_name("lanes", &[Val::I32(0), Val::I32(16), Val::I32(256)]),
+        "run SIMD integer lane kernel",
+    );
+    let memory = must(instance.memory(), "read SIMD integer lane results");
+    for (operation, expected) in expected_lanes().iter().enumerate() {
+        let start = 256 + operation * 16;
+        assert_eq!(&memory[start..start + 16], expected);
+    }
 }
 
 #[test]
 fn unsupported_simd_instruction_fails_during_decode() {
     let bytes = wat::parse_str(
-        "(module (func (param v128 v128) (result v128) local.get 0 local.get 1 i16x8.mul))",
+        "(module (func (param v128 v128) (result v128) local.get 0 local.get 1 i16x8.min_s))",
     )
     .expect("compile unsupported SIMD instruction");
     let error = match WasmModule::from_bytes(&bytes) {
@@ -154,7 +213,7 @@ fn unsupported_simd_instruction_fails_during_decode() {
 }
 
 #[test]
-fn v128_mask_validation_rejects_scalar_and_missing_operands() {
+fn v128_game_kernel_validation_rejects_scalar_and_missing_operands() {
     for (source, expected) in [
         (
             "(module (func (result v128) i32.const 1 i32.const 2 v128.and))",
@@ -166,6 +225,10 @@ fn v128_mask_validation_rejects_scalar_and_missing_operands() {
         ),
         (
             "(module (func (result i32) i32.const 1 v128.any_true))",
+            "validation: type mismatch",
+        ),
+        (
+            "(module (func (result v128) i32.const 1 i32.const 2 i32x4.add))",
             "validation: type mismatch",
         ),
     ] {

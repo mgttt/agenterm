@@ -1561,9 +1561,31 @@ enum Op {
     #[cfg(feature = "simd")]
     V128AnyTrue,
     #[cfg(feature = "simd")]
+    I8x16Add,
+    #[cfg(feature = "simd")]
+    I8x16Sub,
+    #[cfg(feature = "simd")]
+    I16x8Add,
+    #[cfg(feature = "simd")]
+    I16x8Sub,
+    #[cfg(feature = "simd")]
+    I16x8Mul,
+    #[cfg(feature = "simd")]
     I16x8AddSatS,
     #[cfg(feature = "simd")]
     I16x8SubSatS,
+    #[cfg(feature = "simd")]
+    I32x4Add,
+    #[cfg(feature = "simd")]
+    I32x4Sub,
+    #[cfg(feature = "simd")]
+    I32x4Mul,
+    #[cfg(feature = "simd")]
+    I64x2Add,
+    #[cfg(feature = "simd")]
+    I64x2Sub,
+    #[cfg(feature = "simd")]
+    I64x2Mul,
     /// `global.get` / `global.set` — read/write a module global by index.
     GlobalGet(u32),
     GlobalSet(u32),
@@ -2018,8 +2040,19 @@ fn decode(body: &[u8], budget: &mut DecodeBudget) -> Result<DecodedCode, WasmErr
                         81 => ops.push(Op::V128Xor),
                         82 => ops.push(Op::V128Bitselect),
                         83 => ops.push(Op::V128AnyTrue),
+                        110 => ops.push(Op::I8x16Add),
+                        113 => ops.push(Op::I8x16Sub),
+                        142 => ops.push(Op::I16x8Add),
                         143 => ops.push(Op::I16x8AddSatS),
+                        145 => ops.push(Op::I16x8Sub),
                         146 => ops.push(Op::I16x8SubSatS),
+                        149 => ops.push(Op::I16x8Mul),
+                        174 => ops.push(Op::I32x4Add),
+                        177 => ops.push(Op::I32x4Sub),
+                        181 => ops.push(Op::I32x4Mul),
+                        206 => ops.push(Op::I64x2Add),
+                        209 => ops.push(Op::I64x2Sub),
+                        213 => ops.push(Op::I64x2Mul),
                         _ => return Err(WasmError::Decode("unsupported 0xfd opcode")),
                     }
                 }
@@ -4854,8 +4887,19 @@ impl Module {
                     | Op::V128Xor
                     | Op::V128Bitselect
                     | Op::V128AnyTrue
+                    | Op::I8x16Add
+                    | Op::I8x16Sub
+                    | Op::I16x8Add
+                    | Op::I16x8Sub
+                    | Op::I16x8Mul
                     | Op::I16x8AddSatS
-                    | Op::I16x8SubSatS => usage.simd = true,
+                    | Op::I16x8SubSatS
+                    | Op::I32x4Add
+                    | Op::I32x4Sub
+                    | Op::I32x4Mul
+                    | Op::I64x2Add
+                    | Op::I64x2Sub
+                    | Op::I64x2Mul => usage.simd = true,
                     _ => {}
                 }
             }
@@ -6765,30 +6809,81 @@ impl Module {
                     stack.push(Val::I32(value.iter().any(|&byte| byte != 0) as i32));
                 }
                 #[cfg(feature = "simd")]
-                Op::I16x8AddSatS => {
+                operation @ (Op::I8x16Add | Op::I8x16Sub) => {
                     let right = pop_v128(&mut stack)?;
                     let left = pop_v128(&mut stack)?;
-                    let mut mixed = [0; 16];
-                    for lane in 0..8 {
-                        let start = lane * 2;
-                        let a = i16::from_le_bytes([left[start], left[start + 1]]);
-                        let b = i16::from_le_bytes([right[start], right[start + 1]]);
-                        mixed[start..start + 2].copy_from_slice(&a.saturating_add(b).to_le_bytes());
+                    let mut value = [0; 16];
+                    for index in 0..16 {
+                        value[index] = match operation {
+                            Op::I8x16Add => left[index].wrapping_add(right[index]),
+                            Op::I8x16Sub => left[index].wrapping_sub(right[index]),
+                            _ => unreachable!(),
+                        };
                     }
-                    stack.push(Val::V128(mixed));
+                    stack.push(Val::V128(value));
                 }
                 #[cfg(feature = "simd")]
-                Op::I16x8SubSatS => {
+                operation @ (Op::I16x8Add
+                | Op::I16x8Sub
+                | Op::I16x8Mul
+                | Op::I16x8AddSatS
+                | Op::I16x8SubSatS) => {
                     let right = pop_v128(&mut stack)?;
                     let left = pop_v128(&mut stack)?;
-                    let mut mixed = [0; 16];
+                    let mut value = [0; 16];
                     for lane in 0..8 {
                         let start = lane * 2;
                         let a = i16::from_le_bytes([left[start], left[start + 1]]);
                         let b = i16::from_le_bytes([right[start], right[start + 1]]);
-                        mixed[start..start + 2].copy_from_slice(&a.saturating_sub(b).to_le_bytes());
+                        let result = match operation {
+                            Op::I16x8Add => a.wrapping_add(b),
+                            Op::I16x8Sub => a.wrapping_sub(b),
+                            Op::I16x8Mul => a.wrapping_mul(b),
+                            Op::I16x8AddSatS => a.saturating_add(b),
+                            Op::I16x8SubSatS => a.saturating_sub(b),
+                            _ => unreachable!(),
+                        };
+                        value[start..start + 2].copy_from_slice(&result.to_le_bytes());
                     }
-                    stack.push(Val::V128(mixed));
+                    stack.push(Val::V128(value));
+                }
+                #[cfg(feature = "simd")]
+                operation @ (Op::I32x4Add | Op::I32x4Sub | Op::I32x4Mul) => {
+                    let right = pop_v128(&mut stack)?;
+                    let left = pop_v128(&mut stack)?;
+                    let mut value = [0; 16];
+                    for lane in 0..4 {
+                        let start = lane * 4;
+                        let a = i32::from_le_bytes(le4(&left[start..start + 4]));
+                        let b = i32::from_le_bytes(le4(&right[start..start + 4]));
+                        let result = match operation {
+                            Op::I32x4Add => a.wrapping_add(b),
+                            Op::I32x4Sub => a.wrapping_sub(b),
+                            Op::I32x4Mul => a.wrapping_mul(b),
+                            _ => unreachable!(),
+                        };
+                        value[start..start + 4].copy_from_slice(&result.to_le_bytes());
+                    }
+                    stack.push(Val::V128(value));
+                }
+                #[cfg(feature = "simd")]
+                operation @ (Op::I64x2Add | Op::I64x2Sub | Op::I64x2Mul) => {
+                    let right = pop_v128(&mut stack)?;
+                    let left = pop_v128(&mut stack)?;
+                    let mut value = [0; 16];
+                    for lane in 0..2 {
+                        let start = lane * 8;
+                        let a = i64::from_le_bytes(le8(&left[start..start + 8]));
+                        let b = i64::from_le_bytes(le8(&right[start..start + 8]));
+                        let result = match operation {
+                            Op::I64x2Add => a.wrapping_add(b),
+                            Op::I64x2Sub => a.wrapping_sub(b),
+                            Op::I64x2Mul => a.wrapping_mul(b),
+                            _ => unreachable!(),
+                        };
+                        value[start..start + 8].copy_from_slice(&result.to_le_bytes());
+                    }
+                    stack.push(Val::V128(value));
                 }
                 Op::F64Const(bits) => {
                     push_operand(

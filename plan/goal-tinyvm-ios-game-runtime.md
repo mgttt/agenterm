@@ -4450,3 +4450,33 @@ passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
 journey and an arm64 device Release build. Physical-iPhone lifecycle and
 TestFlight install/play evidence remain open, so the persistent goal stays
 active.
+
+## One-hundred-forty-fourth executable increment — wrapping integer SIMD lanes
+
+The optional standard SIMD game-kernel profile now covers portable wrapping
+`add` and `sub` for 8-, 16-, 32- and 64-bit integer lanes, plus `mul` for the
+standard lane widths that define it: `i16x8`, `i32x4` and `i64x2`. Execution
+reads every multi-byte lane in standard little-endian order and uses Rust's
+defined wrapping operations, so overflow is identical in debug/release builds
+and across host ISAs. Validation requires two `v128` operands and one `v128`
+result for every new instruction; scalar operands fail at module load. The
+default profile remains byte-for-byte unchanged and continues to reject SIMD.
+
+Evidence on 2026-08-22: WABT independently compiles and validates the 515-byte
+fixture, then tinyvm, JavaScriptCore and a real headless H5 browser agree on all
+eleven nontrivial wrapping vectors. The 64-bit JavaScript oracles use `BigInt`
+and compare the complete output bytes, avoiding Number precision as false
+evidence. The 146-claim executable PRD map, complete all-feature suite,
+warnings-denied Clippy, rustfmt, ShellCheck, ten-family standard matrix,
+four-cartridge JSC/H5 differential and iOS product gates pass. Default and
+SIMD static cores remain 101,256 and 117,768 bytes. Default iOS consumers link
+at 1,797,640 bytes arm64 and 1,895,176 bytes x86_64; opt-in SIMD consumers link
+at 1,799,160 / 1,903,568 bytes, with the focused SIMD execution owner at
+1,622,376 bytes. Only the opt-in x86_64 simulator ceiling receives one explicit
+16 KiB step; default and both arm64 ceilings are unchanged. The real Nostalgia
+Arcade consumer rebuilds the exact default archive (SHA-256
+`6b106848bd2e76e3c96fa05724112f0e7ded6e827a816e46b8497469759a19f8`),
+passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
+journey and an arm64 device Release build. Physical-iPhone lifecycle and
+TestFlight install/play evidence remain open, so the persistent goal stays
+active.

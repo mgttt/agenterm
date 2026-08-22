@@ -4,7 +4,7 @@
 <body data-status="running">running</body>
 <script>
 (() => {
-  const expected = "32767,-32768,300,-300,32767,-32768,-5000,5000|20000,-20000,-100,100,32766,-32767,32767,-32768|mask=1,0";
+  const expected = "32767,-32768,300,-300,32767,-32768,-5000,5000|20000,-20000,-100,100,32766,-32767,32767,-32768|mask=1,0|lanes=pass";
   const decode = value => {
     const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
     const binary = atob(base64 + "=".repeat((4 - base64.length % 4) % 4));
@@ -42,10 +42,35 @@
       if (actual !== (value & 0xff)) throw new Error(`logic ${operation}:${index}=${actual}`);
     }));
     const any = `${instance.exports.any(0)},${instance.exports.any(176)}`;
-    const result = `${added}|${subtracted}|mask=${any}`;
+    const laneOperations = [[1,0],[1,1],[2,0],[2,1],[2,2],[4,0],[4,1],[4,2],[8,0],[8,1],[8,2]];
+    const laneVector = ([width, arithmetic]) => {
+      const vector = new Array(16).fill(0);
+      const laneMask = (1n << BigInt(width * 8)) - 1n;
+      for (let start = 0; start < 16; start += width) {
+        let a = 0n;
+        let b = 0n;
+        for (let byte = 0; byte < width; byte++) {
+          a |= BigInt(left[start + byte]) << BigInt(byte * 8);
+          b |= BigInt(right[start + byte]) << BigInt(byte * 8);
+        }
+        let value = arithmetic === 0 ? a + b : arithmetic === 1 ? a - b : a * b;
+        value &= laneMask;
+        for (let byte = 0; byte < width; byte++) {
+          vector[start + byte] = Number((value >> BigInt(byte * 8)) & 0xffn);
+        }
+      }
+      return vector;
+    };
+    bytes.fill(0, 256, 432);
+    instance.exports.lanes(0, 16, 256);
+    laneOperations.map(laneVector).forEach((vector, operation) => vector.forEach((value, index) => {
+      const actual = bytes[256 + operation * 16 + index];
+      if (actual !== value) throw new Error(`lanes ${operation}:${index}=${actual}`);
+    }));
+    const result = `${added}|${subtracted}|mask=${any}|lanes=pass`;
     if (result !== expected) throw new Error(`wrong result ${result}`);
     document.body.dataset.status = "pass";
-    document.body.textContent = `OK: H5 SIMD audio/mask=${result}`;
+    document.body.textContent = `OK: H5 SIMD game kernels=${result}`;
   } catch (error) {
     document.body.dataset.status = "fail";
     document.body.textContent = `FAIL: ${error}`;

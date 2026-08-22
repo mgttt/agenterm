@@ -2872,3 +2872,11 @@ stack pop order explicit. In particular, `bitselect` pops mask, second input,
 then first input and computes `(first & mask) | (second & !mask)` per byte.
 Cross-check nontrivial masks in WABT, JavaScriptCore and a browser; all-zero and
 nonzero vectors should independently pin `v128.any_true`.
+
+Wrapping integer lanes are likewise portable scalar work. Decode the standard
+lane width into a distinct VM operation, read each little-endian lane, call the
+matching `wrapping_add`, `wrapping_sub` or `wrapping_mul`, and write the low
+lane bits back. Signed and unsigned wrapping arithmetic have the same bit
+result, so one representation is sufficient. Include overflow-heavy bytes and
+64-bit products in a JavaScript `BigInt` oracle; ordinary `Number` arithmetic
+cannot independently prove all `i64x2` results.

@@ -294,7 +294,9 @@ esac
 # receives one simulator-only step; the arm64 product stays under its ceiling.
 MAX_X86_64_LINKED_BYTES=1900544
 case ",$RUST_FEATURES," in
-  *,simd,*) MAX_X86_64_LINKED_BYTES=1900544 ;;
+  # Wrapping integer lane arithmetic crosses one simulator-only 16 KiB bucket.
+  # The default x86_64 ceiling and both arm64 ceilings remain unchanged.
+  *,simd,*) MAX_X86_64_LINKED_BYTES=1916928 ;;
 esac
 echo "iOS linked sizes: arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} completion=${COMPLETION_LINKED_BYTES} simd=${SIMD_LINKED_BYTES} bytes"
 test "$ARM64_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"
