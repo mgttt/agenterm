@@ -210,7 +210,7 @@ public struct TinyArcadeCartridgeDescriptorV1: Sendable, Equatable {
         return try string(data, cursor: &cursor, length: length)
     }
 
-    private static func string(
+    fileprivate static func string(
         _ data: Data,
         cursor: inout Int,
         length: Int
@@ -226,16 +226,16 @@ public struct TinyArcadeCartridgeDescriptorV1: Sendable, Equatable {
         return value
     }
 
-    private static func u16(_ data: Data, _ offset: Int) -> UInt16 {
+    fileprivate static func u16(_ data: Data, _ offset: Int) -> UInt16 {
         UInt16(data[offset]) | UInt16(data[offset + 1]) << 8
     }
 
-    private static func u32(_ data: Data, _ offset: Int) -> UInt32 {
+    fileprivate static func u32(_ data: Data, _ offset: Int) -> UInt32 {
         UInt32(data[offset]) | UInt32(data[offset + 1]) << 8
             | UInt32(data[offset + 2]) << 16 | UInt32(data[offset + 3]) << 24
     }
 
-    private static func decodeError(_ message: String) -> TinyArcadeRuntimeError {
+    fileprivate static func decodeError(_ message: String) -> TinyArcadeRuntimeError {
         TinyArcadeRuntimeError(
             status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
             message: message
@@ -1870,6 +1870,125 @@ public struct TinyArcadeNativeFunctionV1 {
     }
 }
 
+public struct TinyArcadeHostCompatibilityIssueV1: Sendable, Equatable {
+    public let module: String
+    public let field: String
+    public let requiredParameterCount: UInt8
+    public let requiredResultCount: UInt8
+    public let availableParameterCount: UInt8?
+    public let availableResultCount: UInt8?
+
+    public init(
+        module: String,
+        field: String,
+        requiredParameterCount: UInt8,
+        requiredResultCount: UInt8,
+        availableParameterCount: UInt8?,
+        availableResultCount: UInt8?
+    ) {
+        self.module = module
+        self.field = field
+        self.requiredParameterCount = requiredParameterCount
+        self.requiredResultCount = requiredResultCount
+        self.availableParameterCount = availableParameterCount
+        self.availableResultCount = availableResultCount
+    }
+}
+
+/// Static, callback-free compatibility result for one cartridge and exact
+/// TAH1 app-build profile. An empty issue list is compatible.
+public struct TinyArcadeHostCompatibilityReportV1: Sendable {
+    public let descriptor: TinyArcadeCartridgeDescriptorV1
+    public let issues: [TinyArcadeHostCompatibilityIssueV1]
+
+    public var isCompatible: Bool { issues.isEmpty }
+
+    fileprivate static func decode(
+        _ data: Data,
+        cartridgeLength: Int
+    ) throws -> Self {
+        guard data.count >= 48,
+              data.prefix(4) == Data("TAC1".utf8),
+              TinyArcadeCartridgeDescriptorV1.u16(data, 4) == 1,
+              TinyArcadeCartridgeDescriptorV1.u16(data, 6) == 16,
+              TinyArcadeCartridgeDescriptorV1.u16(data, 10) == 0 else {
+            throw TinyArcadeCartridgeDescriptorV1.decodeError(
+                "invalid host compatibility report header"
+            )
+        }
+        let issueCount = Int(TinyArcadeCartridgeDescriptorV1.u16(data, 8))
+        let descriptorLength = Int(TinyArcadeCartridgeDescriptorV1.u32(data, 12))
+        let descriptorEnd = 16 + descriptorLength
+        guard issueCount <= 72,
+              (32...(64 * 1_024 - 16)).contains(descriptorLength),
+              descriptorEnd <= data.count else {
+            throw TinyArcadeCartridgeDescriptorV1.decodeError(
+                "invalid host compatibility report bounds"
+            )
+        }
+        let descriptor = try TinyArcadeCartridgeDescriptorV1.decode(
+            data.subdata(in: 16..<descriptorEnd),
+            cartridgeLength: cartridgeLength
+        )
+        var cursor = descriptorEnd
+        var issues: [TinyArcadeHostCompatibilityIssueV1] = []
+        issues.reserveCapacity(issueCount)
+        for _ in 0..<issueCount {
+            guard cursor + 8 <= data.count else {
+                throw TinyArcadeCartridgeDescriptorV1.decodeError(
+                    "truncated host compatibility issue"
+                )
+            }
+            let moduleLength = Int(TinyArcadeCartridgeDescriptorV1.u16(data, cursor))
+            let fieldLength = Int(TinyArcadeCartridgeDescriptorV1.u16(data, cursor + 2))
+            let requiredParameters = data[cursor + 4]
+            let requiredResults = data[cursor + 5]
+            let availableParameters = data[cursor + 6]
+            let availableResults = data[cursor + 7]
+            cursor += 8
+            guard (1...128).contains(moduleLength),
+                  (1...64).contains(fieldLength),
+                  requiredParameters <= 16,
+                  requiredResults <= 16,
+                  (availableParameters == UInt8.max) == (availableResults == UInt8.max),
+                  availableParameters == UInt8.max
+                    || (availableParameters <= 16 && availableResults <= 16) else {
+                throw TinyArcadeCartridgeDescriptorV1.decodeError(
+                    "invalid host compatibility issue"
+                )
+            }
+            let module = try TinyArcadeCartridgeDescriptorV1.string(
+                data,
+                cursor: &cursor,
+                length: moduleLength
+            )
+            let field = try TinyArcadeCartridgeDescriptorV1.string(
+                data,
+                cursor: &cursor,
+                length: fieldLength
+            )
+            issues.append(
+                TinyArcadeHostCompatibilityIssueV1(
+                    module: module,
+                    field: field,
+                    requiredParameterCount: requiredParameters,
+                    requiredResultCount: requiredResults,
+                    availableParameterCount: availableParameters == UInt8.max
+                        ? nil : availableParameters,
+                    availableResultCount: availableResults == UInt8.max
+                        ? nil : availableResults
+                )
+            )
+        }
+        guard cursor == data.count else {
+            throw TinyArcadeCartridgeDescriptorV1.decodeError(
+                "trailing host compatibility report bytes"
+            )
+        }
+        return Self(descriptor: descriptor, issues: issues)
+    }
+}
+
 /// Deterministic callback-free description of one exact app build's limits and
 /// app-compiled native imports. Publish these bytes for converter preflight.
 public struct TinyArcadeHostProfileV1: Sendable, Equatable {
@@ -1943,10 +2062,54 @@ public struct TinyArcadeHostProfileV1: Sendable, Equatable {
     public func inspectCompatibleCartridge(
         _ cartridge: Data
     ) throws -> TinyArcadeCartridgeDescriptorV1 {
+        let descriptor = try copyProfileArtifact(
+            cartridge,
+            minimumLength: 32,
+            context: "compatible cartridge descriptor",
+            using: tinyarcade_v1_copy_compatible_cartridge_descriptor
+        )
+        return try TinyArcadeCartridgeDescriptorV1.decode(
+            descriptor,
+            cartridgeLength: cartridge.count
+        )
+    }
+
+    /// Return every exact import mismatch as data for converter or creator UI.
+    /// This never instantiates the module or invokes a native handler.
+    @MainActor
+    public func compatibilityReport(
+        for cartridge: Data
+    ) throws -> TinyArcadeHostCompatibilityReportV1 {
+        let report = try copyProfileArtifact(
+            cartridge,
+            minimumLength: 48,
+            context: "host compatibility report",
+            using: tinyarcade_v1_copy_host_compatibility_report
+        )
+        return try TinyArcadeHostCompatibilityReportV1.decode(
+            report,
+            cartridgeLength: cartridge.count
+        )
+    }
+
+    private typealias ProfileArtifactCopy = (
+        UnsafePointer<UInt8>?, Int,
+        UnsafePointer<UInt8>?, Int,
+        UnsafeMutablePointer<UInt8>?, Int,
+        UnsafeMutablePointer<Int>?
+    ) -> tinyarcade_status_v1
+
+    @MainActor
+    private func copyProfileArtifact(
+        _ cartridge: Data,
+        minimumLength: Int,
+        context: String,
+        using copy: ProfileArtifactCopy
+    ) throws -> Data {
         var required = 0
         let query = cartridge.withUnsafeBytes { wasm in
             encoded.withUnsafeBytes { profile in
-                tinyarcade_v1_copy_compatible_cartridge_descriptor(
+                copy(
                     wasm.bindMemory(to: UInt8.self).baseAddress,
                     wasm.count,
                     profile.bindMemory(to: UInt8.self).baseAddress,
@@ -1958,18 +2121,18 @@ public struct TinyArcadeHostProfileV1: Sendable, Equatable {
             }
         }
         guard query == TINYARCADE_BUFFER_TOO_SMALL,
-              (32...(64 * 1_024)).contains(required) else {
+              (minimumLength...(64 * 1_024)).contains(required) else {
             try TinyArcadeRuntimeV1.check(query)
             throw TinyArcadeRuntimeError(
                 status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
-                message: "invalid compatible cartridge descriptor length"
+                message: "invalid \(context) length"
             )
         }
-        var descriptor = Data(count: required)
+        var artifact = Data(count: required)
         let status = cartridge.withUnsafeBytes { wasm in
             encoded.withUnsafeBytes { profile in
-                descriptor.withUnsafeMutableBytes { output in
-                    tinyarcade_v1_copy_compatible_cartridge_descriptor(
+                artifact.withUnsafeMutableBytes { output in
+                    copy(
                         wasm.bindMemory(to: UInt8.self).baseAddress,
                         wasm.count,
                         profile.bindMemory(to: UInt8.self).baseAddress,
@@ -1982,16 +2145,13 @@ public struct TinyArcadeHostProfileV1: Sendable, Equatable {
             }
         }
         try TinyArcadeRuntimeV1.check(status)
-        guard required == descriptor.count else {
+        guard required == artifact.count else {
             throw TinyArcadeRuntimeError(
                 status: Int32(TINYARCADE_DECODE_ERROR.rawValue),
-                message: "compatible cartridge descriptor length changed"
+                message: "\(context) length changed"
             )
         }
-        return try TinyArcadeCartridgeDescriptorV1.decode(
-            descriptor,
-            cartridgeLength: cartridge.count
-        )
+        return artifact
     }
 }
 

@@ -26,6 +26,9 @@ without instantiating the guest or calling handlers, and returns the canonical
 TAD1 description produced under that same profile rather than reparsing under
 defaults. Dynamic fuel/output and native semantics remain separate
 reviewed-game gates.
+Use `compatibilityReport(for:)` when creator UI needs every missing or
+wrong-signature import as typed data; a zero-issue report is compatible and
+both outcomes remain callback-free.
 The render, audio and state ceilings preserve zero exactly as a disabled or
 empty-only channel; TAH1 never rewrites zero to a default or to unlimited.
 

@@ -83,5 +83,5 @@ test -f "$app"
 cmp "$producer" "$consumed"
 nm -gj "$app" | grep -Fqx '_tinyarcade_v1_completion_create'
 
-echo 'OK: exact current-main tinyvm archive and ABI v1.11 run in the real arm64 App target with behavioral Apple input proofs'
+echo 'OK: exact current-main tinyvm archive and ABI v1.12 run in the real arm64 App target with behavioral Apple input proofs'
 shasum -a 256 "$producer" "$consumed"

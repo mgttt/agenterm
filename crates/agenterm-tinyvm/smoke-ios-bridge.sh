@@ -254,15 +254,18 @@ COMPLETION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeCompletionSmoke-arm64")
 # Preparing the complete snapshot beside its destination, applying protection
 # before publication and then replacing the old generation atomically funds one
 # further step. This is the persistence transaction itself, not test scaffolding.
-# ABI v1.11's profile-bound TAD1 return stays inside the default product gate.
-MAX_ARM64_LINKED_BYTES=1769472
+# ABI v1.11's profile-bound TAD1 return stayed inside the default product gate.
+# ABI v1.12 adds the public typed Swift issue model, strict TAC1 decoder and
+# full matching/missing/signature-mismatch paths. That creator-tooling boundary
+# crosses two 16 KiB buckets; keep the new ceiling explicit and finite.
+MAX_ARM64_LINKED_BYTES=1802240
 # The optional SIMD profile keeps v128 inline and adds its portable interpreter
 # path only when explicitly requested. Give that opt-in product two separate
 # 16 KiB graduation steps. Its ABI v1.11 combined compatibility return crosses
 # the prior bucket and receives one further explicit step; never weaken the
 # default iOS product ceiling.
 case ",$RUST_FEATURES," in
-  *,simd,*) MAX_ARM64_LINKED_BYTES=1785856 ;;
+  *,simd,*) MAX_ARM64_LINKED_BYTES=1802240 ;;
 esac
 # x86_64 is a simulator-only compatibility slice. Keep its separate ceiling
 # honest instead of weakening the arm64 product-consumer gate.
@@ -278,9 +281,9 @@ esac
 # compiled only into this smoke executable and receives one further step. The
 # crash-recoverable prepared slot adds regular-file/symlink discrimination and
 # receives one simulator-only step; the arm64 product stays under its ceiling.
-MAX_X86_64_LINKED_BYTES=1867776
+MAX_X86_64_LINKED_BYTES=1900544
 case ",$RUST_FEATURES," in
-  *,simd,*) MAX_X86_64_LINKED_BYTES=1867776 ;;
+  *,simd,*) MAX_X86_64_LINKED_BYTES=1900544 ;;
 esac
 echo "iOS linked sizes: arm64=${ARM64_LINKED_BYTES} x86_64=${X86_64_LINKED_BYTES} profile-catalog=${HOST_PROFILE_CATALOG_LINKED_BYTES} replay=${REPLAY_LINKED_BYTES} private=${PRIVATE_LIBRARY_LINKED_BYTES} session=${GAME_SESSION_LINKED_BYTES} completion=${COMPLETION_LINKED_BYTES} simd=${SIMD_LINKED_BYTES} bytes"
 test "$ARM64_LINKED_BYTES" -le "$MAX_ARM64_LINKED_BYTES"

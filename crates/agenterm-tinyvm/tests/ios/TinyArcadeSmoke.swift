@@ -470,8 +470,27 @@ struct TinyArcadeSmoke {
         precondition(hostProfile.encoded[36..<40].allSatisfy { $0 == 0 })
         let profileDescriptor = try hostProfile.inspectCompatibleCartridge(nativeBytes)
         precondition(profileDescriptor == descriptor)
+        let compatibleReport = try hostProfile.compatibilityReport(for: nativeBytes)
+        precondition(compatibleReport.isCompatible)
+        precondition(compatibleReport.descriptor == descriptor)
+        precondition(compatibleReport.issues.isEmpty)
         precondition(profileHandlerCalls == 0, "static profile check must not call app code")
         let coreOnlyProfile = try TinyArcadeHostProfileV1.appBuild()
+        let incompatibleReport = try coreOnlyProfile.compatibilityReport(for: nativeBytes)
+        precondition(!incompatibleReport.isCompatible)
+        precondition(incompatibleReport.descriptor == descriptor)
+        precondition(
+            incompatibleReport.issues == [
+                TinyArcadeHostCompatibilityIssueV1(
+                    module: "fan:physics/v1",
+                    field: "step_world",
+                    requiredParameterCount: 2,
+                    requiredResultCount: 1,
+                    availableParameterCount: nil,
+                    availableResultCount: nil
+                ),
+            ]
+        )
         do {
             _ = try coreOnlyProfile.inspectCompatibleCartridge(nativeBytes)
             preconditionFailure("core-only profile must reject a native import")

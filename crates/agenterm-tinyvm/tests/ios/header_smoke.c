@@ -1,7 +1,7 @@
 #include "tinyarcade.h"
 
-_Static_assert(TINYARCADE_ABI_VERSION == 0x0001000bu, "ABI version drift");
-_Static_assert(TINYARCADE_ABI_MINOR == 11u, "ABI minor drift");
+_Static_assert(TINYARCADE_ABI_VERSION == 0x0001000cu, "ABI version drift");
+_Static_assert(TINYARCADE_ABI_MINOR == 12u, "ABI minor drift");
 _Static_assert(sizeof(tinyarcade_config_v1) == 48, "config layout drift");
 _Static_assert(sizeof(tinyarcade_execution_stats_v1) == 40, "stats layout drift");
 _Static_assert(sizeof(tinyarcade_execution_stats_v2) == 48, "extended stats layout drift");

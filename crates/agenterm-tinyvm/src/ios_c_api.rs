@@ -14,9 +14,9 @@ use std::thread::{self, ThreadId};
 use crate::{
     CartridgeCache, CartridgeDescriptor, CartridgeTrustStore, CatalogEntry, CompletionError,
     ExecutionStats, GameFrame, GameInput, GameLimits, GameRuntime, GuestResourceHandle,
-    HostCompletionQueue, HostProfileV1, Limits, MAX_NATIVE_CALLS_PER_LIFECYCLE,
-    MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, ReplayRecorderV1, ReplayTraceV1,
-    ResourceDomainAllocator, WasmError,
+    HostCompatibilityReportV1, HostCompletionQueue, HostProfileV1, Limits,
+    MAX_NATIVE_CALLS_PER_LIFECYCLE, MAX_NATIVE_FUNCTIONS, NativeModuleRegistry, ReplayRecorderV1,
+    ReplayTraceV1, ResourceDomainAllocator, WasmError,
 };
 
 pub const STATUS_OK: i32 = 0;
@@ -761,7 +761,7 @@ unsafe fn copy_bytes(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn tinyarcade_v1_abi_version() -> u32 {
-    (1 << 16) | 11
+    (1 << 16) | 12
 }
 
 fn append_u16(output: &mut Vec<u8>, value: usize) -> Result<(), FfiError> {
@@ -833,6 +833,51 @@ fn encode_descriptor(
         encoded.push(0);
         encoded.extend_from_slice(import.module.as_bytes());
         encoded.extend_from_slice(import.field.as_bytes());
+    }
+    debug_assert_eq!(encoded.len(), encoded_len);
+    Ok(encoded)
+}
+
+fn encode_compatibility_report(
+    report: &HostCompatibilityReportV1,
+    wasm_len: usize,
+) -> Result<Vec<u8>, FfiError> {
+    let descriptor = encode_descriptor(&report.descriptor, wasm_len)?;
+    let mut encoded_len = 16usize
+        .checked_add(descriptor.len())
+        .ok_or(FfiError::new(STATUS_DECODE, "compatibility report limit"))?;
+    for issue in &report.issues {
+        encoded_len = encoded_len
+            .checked_add(8)
+            .and_then(|value| value.checked_add(issue.module.len()))
+            .and_then(|value| value.checked_add(issue.field.len()))
+            .ok_or(FfiError::new(STATUS_DECODE, "compatibility report limit"))?;
+    }
+    if encoded_len > 64 * 1024 || report.issues.len() > u16::MAX as usize {
+        return Err(FfiError::new(STATUS_DECODE, "compatibility report limit"));
+    }
+    let descriptor_len = u32::try_from(descriptor.len())
+        .map_err(|_| FfiError::new(STATUS_DECODE, "compatibility report limit"))?;
+    let mut encoded = Vec::new();
+    encoded
+        .try_reserve_exact(encoded_len)
+        .map_err(|_| FfiError::new(STATUS_DECODE, "compatibility report allocation"))?;
+    encoded.extend_from_slice(b"TAC1");
+    encoded.extend_from_slice(&1u16.to_le_bytes());
+    encoded.extend_from_slice(&16u16.to_le_bytes());
+    encoded.extend_from_slice(&(report.issues.len() as u16).to_le_bytes());
+    encoded.extend_from_slice(&0u16.to_le_bytes());
+    encoded.extend_from_slice(&descriptor_len.to_le_bytes());
+    encoded.extend_from_slice(&descriptor);
+    for issue in &report.issues {
+        append_u16(&mut encoded, issue.module.len())?;
+        append_u16(&mut encoded, issue.field.len())?;
+        encoded.push(issue.required_params);
+        encoded.push(issue.required_results);
+        encoded.push(issue.available_params.unwrap_or(u8::MAX));
+        encoded.push(issue.available_results.unwrap_or(u8::MAX));
+        encoded.extend_from_slice(issue.module.as_bytes());
+        encoded.extend_from_slice(issue.field.as_bytes());
     }
     debug_assert_eq!(encoded.len(), encoded_len);
     Ok(encoded)
@@ -941,6 +986,30 @@ pub unsafe extern "C" fn tinyarcade_v1_copy_compatible_cartridge_descriptor(
             .and_then(|profile| profile.inspect_cartridge(wasm))
             .map_err(wasm_error)?;
         let encoded = encode_descriptor(&descriptor, wasm.len())?;
+        unsafe { copy_bytes(&encoded, output, capacity, output_len) }
+    })
+}
+
+/// Return one bounded, canonical TAC1 compatibility report without
+/// instantiating the cartridge. The report embeds the profile-bound TAD1
+/// descriptor and every unavailable or signature-mismatched import.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tinyarcade_v1_copy_host_compatibility_report(
+    wasm: *const u8,
+    wasm_len: usize,
+    profile: *const u8,
+    profile_len: usize,
+    output: *mut u8,
+    capacity: usize,
+    output_len: *mut usize,
+) -> i32 {
+    boundary(|| {
+        let wasm = unsafe { input_bytes(wasm, wasm_len, "invalid cartridge input")? };
+        let profile = unsafe { input_bytes(profile, profile_len, "invalid host profile input")? };
+        let report = HostProfileV1::decode(profile)
+            .and_then(|profile| profile.compatibility_report(wasm))
+            .map_err(wasm_error)?;
+        let encoded = encode_compatibility_report(&report, wasm.len())?;
         unsafe { copy_bytes(&encoded, output, capacity, output_len) }
     })
 }
@@ -2499,7 +2568,7 @@ mod tests {
     fn c_handle_drives_frame_snapshot_resume_and_thread_owner() {
         let wasm = cartridge();
         let runtime = unsafe { open(&wasm) };
-        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 11);
+        assert_eq!(tinyarcade_v1_abi_version(), (1 << 16) | 12);
         let mut origin = u32::MAX;
         assert_eq!(
             unsafe { tinyarcade_v1_origin(runtime, &mut origin) },
@@ -2813,6 +2882,43 @@ mod tests {
             u32::from_le_bytes(compatible[24..28].try_into().expect("descriptor length")),
             wasm.len() as u32
         );
+        let mut report_len = 0usize;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_compatibility_report(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    profile.as_ptr(),
+                    profile.len(),
+                    ptr::null_mut(),
+                    0,
+                    &mut report_len,
+                )
+            },
+            STATUS_BUFFER_TOO_SMALL
+        );
+        let mut report = vec![0; report_len];
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_compatibility_report(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    profile.as_ptr(),
+                    profile.len(),
+                    report.as_mut_ptr(),
+                    report.len(),
+                    &mut report_len,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(&report[..4], b"TAC1");
+        assert_eq!(u16::from_le_bytes([report[8], report[9]]), 0);
+        let report_descriptor_len =
+            u32::from_le_bytes(report[12..16].try_into().expect("report descriptor length"))
+                as usize;
+        assert_eq!(&report[16..20], b"TAD1");
+        assert_eq!(report.len(), 16 + report_descriptor_len);
         assert_eq!(
             probe.calls.get(),
             0,
@@ -2876,6 +2982,49 @@ mod tests {
             STATUS_TRAP
         );
         assert_eq!(compatible_len, usize::MAX);
+        report_len = 0;
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_compatibility_report(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    wrong_profile.as_ptr(),
+                    wrong_profile.len(),
+                    ptr::null_mut(),
+                    0,
+                    &mut report_len,
+                )
+            },
+            STATUS_BUFFER_TOO_SMALL
+        );
+        report.resize(report_len, 0);
+        assert_eq!(
+            unsafe {
+                tinyarcade_v1_copy_host_compatibility_report(
+                    wasm.as_ptr(),
+                    wasm.len(),
+                    wrong_profile.as_ptr(),
+                    wrong_profile.len(),
+                    report.as_mut_ptr(),
+                    report.len(),
+                    &mut report_len,
+                )
+            },
+            STATUS_OK
+        );
+        assert_eq!(u16::from_le_bytes([report[8], report[9]]), 1);
+        let descriptor_len =
+            u32::from_le_bytes(report[12..16].try_into().expect("report descriptor length"))
+                as usize;
+        let issue = 16 + descriptor_len;
+        let module_len = u16::from_le_bytes([report[issue], report[issue + 1]]) as usize;
+        let field_len = u16::from_le_bytes([report[issue + 2], report[issue + 3]]) as usize;
+        assert_eq!(&report[issue + 4..issue + 8], &[2, 1, 1, 1]);
+        assert_eq!(&report[issue + 8..issue + 8 + module_len], module);
+        assert_eq!(
+            &report[issue + 8 + module_len..issue + 8 + module_len + field_len],
+            field
+        );
         assert_eq!(probe.calls.get(), 0);
     }
 
@@ -3603,6 +3752,7 @@ mod tests {
             "tinyarcade_v1_copy_host_profile_with_completions",
             "tinyarcade_v1_check_cartridge_host_profile",
             "tinyarcade_v1_copy_compatible_cartridge_descriptor",
+            "tinyarcade_v1_copy_host_compatibility_report",
             "tinyarcade_v1_completion_create",
             "tinyarcade_v1_completion_close",
             "tinyarcade_v1_completion_begin",

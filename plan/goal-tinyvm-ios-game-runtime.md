@@ -81,7 +81,8 @@ tinyvm iOS game runtime
 │   │       └── indexed2d metadata extension [x]
 │   ├── app-build host profile        [x]
 │   │   ├── exact zero-budget channel semantics [x]
-│   │   └── profile-bound descriptor return [x]
+│   │   ├── profile-bound descriptor return [x]
+│   │   └── typed compatibility issue report [x]
 │   ├── deterministic catalog publisher [x]
 │   └── no public arbitrary execution [~]
 ├── iOS native bridge                 [~]
@@ -4261,6 +4262,32 @@ all-feature suite, JSC/H5 differential, warnings-denied Clippy, rustfmt,
 ShellCheck and the 137-leaf executable PRD map pass. The real App consumes the
 exact ABI v1.11 archive with SHA-256
 `58e04e8cd26151aee63addd5a7359858ccf0c3f9d5ad0c15efcc150d1a267e2d`,
+passes eight Depth Well tests, five Signal Lock tests, one UI journey and an
+unsigned arm64 device Release build. Physical-device and TestFlight evidence
+remain open, so the persistent goal stays active.
+
+## One-hundred-thirty-seventh executable increment — typed compatibility issues
+
+C ABI v1.12 now exports one bounded canonical TAC1 compatibility report. It
+embeds the exact profile-bound TAD1 descriptor and preserves every missing or
+wrong-signature import as required and available arities. Incompatibility is
+successful report data for converter/creator UI; malformed bytes and resource
+limits remain errors. Swift exposes the same result through public Sendable
+value types and `compatibilityReport(for:)`, while matching, reporting and
+descriptor-only paths remain callback-free and never instantiate guest code.
+
+Evidence on 2026-08-22: the C black box round-trips a zero-issue TAC1 report,
+then checks a wrong-signature issue down to module, field and both arities. The
+linked Swift smoke checks the matching descriptor and a wholly missing native
+function with nil available arities, while proving the app handler call count
+remains zero. Default iOS consumers link at 1,793,224 bytes arm64 and 1,886,552
+bytes x86_64; opt-in SIMD links at 1,793,960 / 1,890,576 bytes. The public
+typed model and strict decoder receive two explicit 16 KiB default product
+steps; the SIMD product reuses its prior v1.11 headroom plus one matching step.
+The complete all-feature suite, JSC/H5 differential, warnings-denied Clippy,
+rustfmt, ShellCheck and the 138-leaf executable PRD map pass. The real App
+consumes the exact ABI v1.12 archive with SHA-256
+`7932583339a4b5c2ba22291b3329bab0447d3d37e4d97fa26f0c7797a61997f7`,
 passes eight Depth Well tests, five Signal Lock tests, one UI journey and an
 unsigned arm64 device Release build. Physical-device and TestFlight evidence
 remain open, so the persistent goal stays active.

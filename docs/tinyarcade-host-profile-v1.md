@@ -83,6 +83,38 @@ contains only their standard WASM interface and finite call quota. Publishing
 TAH1 therefore lets fan converters target a concrete app build without
 publishing callbacks, dylibs, JIT/AOT products or tinyvm internals.
 
+## Canonical compatibility report
+
+C ABI v1.12 and Swift can carry the complete static result as a bounded TAC1
+artifact. All integers are little-endian and the complete report is at most
+64 KiB:
+
+```text
+"TAC1"                       4 bytes
+schema_version                u16; exactly 1
+header_length                 u16; exactly 16
+issue_count                   u16; at most 72
+reserved                      u16; zero
+descriptor_length             u32
+descriptor                    exact canonical TAD1 bytes
+repeated issue; indexed2d-metadata availability first when present, then
+native issues in cartridge import order:
+  module_length               u16; 1...128
+  field_length                u16; 1...64
+  required_parameter_count    u8; at most 16
+  required_result_count       u8; at most 16
+  available_parameter_count   u8; at most 16, or 255 when missing
+  available_result_count      u8; at most 16, or 255 when missing
+  module                      canonical UTF-8 bytes
+  field                       canonical UTF-8 bytes
+```
+
+The two available counts are either both present or both `255`. A compatible
+report has zero issues but still carries the profile-bound descriptor. An
+incompatible report is successful report data rather than a guest trap;
+malformed WASM, malformed TAH1 and resource-limit failures remain errors. TAC1
+is callback-free, performs no instantiation and grants no install authority.
+
 ## Tool and iOS flow
 
 The core-only default profile can be produced and inspected without an app:
@@ -112,6 +144,9 @@ two-stage `tinyarcade_v1_copy_host_profile`; Swift uses
 `TinyArcadeHostProfileV1.appBuild`. All three encode the same TAH1 bytes.
 `inspect_cartridge`, `tinyarcade_v1_check_cartridge_host_profile` and
 `inspectCompatibleCartridge` share the same non-executing compatibility gate.
+The C `tinyarcade_v1_copy_host_compatibility_report` and Swift
+`compatibilityReport(for:)` surfaces preserve every typed mismatch for creator
+UI instead of flattening incompatibility to one error string.
 
 An app owner publishes the exact artifact as `host-profile-v1.tahost` beside
 `catalog-v1.json`; the catalog records its bounded length and SHA-256 so a site

@@ -178,6 +178,13 @@ instead of making Swift parse the cartridge again under default limits. The
 ordinary check-only and descriptor-only calls remain available for existing C
 consumers; the combined call changes neither artifact format nor runtime state.
 
+ABI v1.12 adds `tinyarcade_v1_copy_host_compatibility_report` and Swift's
+typed `compatibilityReport(for:)`. The bounded canonical TAC1 result embeds the
+profile-bound TAD1 descriptor and every missing or wrong-signature import.
+Incompatibility is returned as inspectable data; malformed input and resource
+failures remain errors. Neither matching nor incompatible reports instantiate
+the guest or invoke app callbacks.
+
 `TinyArcadePrivateLibraryV1` turns that private opening into a complete local
 library transaction. It preflights exact bytes under core-only policy before
 an atomic canonical install, caps each object at the runtime's 2 MiB ceiling
@@ -397,6 +404,8 @@ imports used by runtime binding.
 
 ABI v1.11 only appends the combined static compatibility/descriptor export.
 It changes no struct layout, callback ownership rule or cartridge ABI.
+ABI v1.12 similarly appends only the static typed-report export and Swift
+value types; the runtime/config layouts remain unchanged.
 
 ## Current evidence boundary
 
@@ -487,10 +496,10 @@ unit tests plus the two-game UI journey, and builds the generic arm64 iOS
 product. It then requires the consumer's archive to be byte-identical to the
 one emitted under this repository's `target/`, checks that the final executable
 contains the ABI v1.10 completion-channel symbol while consuming the current
-v1.11 archive, and rejects any implicit
+v1.12 archive, and rejects any implicit
 rewrite of the committed cartridges or Xcode project. Evidence on 2026-08-22
 has archive SHA-256
-`58e04e8cd26151aee63addd5a7359858ccf0c3f9d5ad0c15efcc150d1a267e2d`;
+`7932583339a4b5c2ba22291b3329bab0447d3d37e4d97fa26f0c7797a61997f7`;
 the App contains only the 6,116-byte Depth Well and 6,040-byte Signal Lock
 cartridges, with no WebKit/JavaScriptCore, URLSession, external-library surface
 or archived native game engine. A counted App-target test now takes a tone from
