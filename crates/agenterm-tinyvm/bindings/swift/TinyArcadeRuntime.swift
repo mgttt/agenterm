@@ -2819,11 +2819,14 @@ public final class TinyArcadeReviewedLibraryV1 {
 /// Main-actor owner for the single-threaded C runtime handle.
 @MainActor
 public final class TinyArcadeRuntimeV1 {
+    private static let outputBufferSlotCount = 2
+
     private var handle: OpaquePointer?
     private var nativeCallbackBoxes: [TinyArcadeNativeCallbackBox] = []
     private var completionChannels: [TinyArcadeCompletionV1] = []
-    private var renderBuffer = Data()
-    private var audioBuffer = Data()
+    private var renderBuffers = Array(repeating: Data(), count: outputBufferSlotCount)
+    private var audioBuffers = Array(repeating: Data(), count: outputBufferSlotCount)
+    private var nextOutputBufferSlot = 0
 
     public init(
         cartridge: Data,
@@ -2938,8 +2941,9 @@ public final class TinyArcadeRuntimeV1 {
         self.handle = nil
         nativeCallbackBoxes.removeAll()
         completionChannels.removeAll()
-        renderBuffer = Data()
-        audioBuffer = Data()
+        renderBuffers.removeAll(keepingCapacity: false)
+        audioBuffers.removeAll(keepingCapacity: false)
+        nextOutputBufferSlot = 0
     }
 
     public func tick(buttons: UInt32, clockMilliseconds: UInt32) throws -> TinyArcadeFrame {
@@ -2999,13 +3003,18 @@ public final class TinyArcadeRuntimeV1 {
     ) throws -> (render: Data, audio: Data) {
         do {
             let handle = try liveHandle()
+            let slot = nextOutputBufferSlot
             try Self.check(tinyarcade_v1_tick(handle, buttons, clockMilliseconds))
-            try Self.copy(handle, tinyarcade_v1_copy_render, into: &renderBuffer)
-            try Self.copy(handle, tinyarcade_v1_copy_audio, into: &audioBuffer)
-            return (renderBuffer, audioBuffer)
+            try Self.copy(handle, tinyarcade_v1_copy_render, into: &renderBuffers[slot])
+            try Self.copy(handle, tinyarcade_v1_copy_audio, into: &audioBuffers[slot])
+            let output = (renderBuffers[slot], audioBuffers[slot])
+            nextOutputBufferSlot = (slot + 1) % Self.outputBufferSlotCount
+            return output
         } catch {
-            renderBuffer.removeAll(keepingCapacity: true)
-            audioBuffer.removeAll(keepingCapacity: true)
+            if !renderBuffers.isEmpty {
+                renderBuffers[nextOutputBufferSlot].removeAll(keepingCapacity: true)
+                audioBuffers[nextOutputBufferSlot].removeAll(keepingCapacity: true)
+            }
             throw error
         }
     }

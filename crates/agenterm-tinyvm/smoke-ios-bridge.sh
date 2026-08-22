@@ -28,11 +28,13 @@ if grep -Fq 'public let paletteRGBA: [UInt32]' \
 fi
 grep -Fq 'var rgba = Data(count: pixels.count * 4)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
-grep -Fq 'private var renderBuffer = Data()' \
+grep -Fq 'private static let outputBufferSlotCount = 2' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
-grep -Fq 'private var audioBuffer = Data()' \
+grep -Fq 'private var renderBuffers = Array(repeating: Data(), count: outputBufferSlotCount)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
-grep -Fq 'try Self.copy(handle, tinyarcade_v1_copy_render, into: &renderBuffer)' \
+grep -Fq 'private var audioBuffers = Array(repeating: Data(), count: outputBufferSlotCount)' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'try Self.copy(handle, tinyarcade_v1_copy_render, into: &renderBuffers[slot])' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 if grep -Fq 'bytes.reserveCapacity(pixels.count * 4)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then

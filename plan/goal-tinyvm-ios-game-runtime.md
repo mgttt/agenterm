@@ -4736,3 +4736,32 @@ ABI. The real Nostalgia Arcade consumer passes 13 cartridge unit tests, its
 two-game UI journey and an arm64 device Release build with the byte-identical
 ABI v1.13 archive. Physical-iPhone lifecycle/performance/audio and TestFlight
 install/play evidence remain open, so the persistent goal stays active.
+
+## One-hundred-fifty-third executable increment — two-slot Swift frame pool
+
+The previous single reusable Swift output buffer was safe but did not match a
+real native UI update. In `frame = try runtime.tickMedia(...)`, the displayed
+old frame necessarily remains alive while the right-hand side is evaluated, so
+mutating the one runtime-owned `Data` triggered copy-on-write on every frame.
+`TinyArcadeRuntimeV1` now alternates two paired render/audio slots. With the
+ordinary one-visible-frame ownership pattern, each slot is unique again when
+the runtime returns to it and both allocations are reused after warm-up. The
+pool retains at most twice the configured render-plus-audio bounds. Callers may
+still retain arbitrary history: an occupied slot detaches through Swift COW and
+cannot mutate an older value. Failed ticks clear only the selected slot's
+logical output, and close releases the complete pool.
+
+The booted iOS Simulator black box models Swift assignment order directly. It
+keeps the immediately previous Paddle Guard frame alive during every next tick,
+proves two distinct warm-up addresses then exact A/B/A/B reuse, retains an
+additional historical frame to force safe COW separation, verifies its bytes
+remain stable, releases it and proves the detached slot is reused. The default
+UIKit lifecycle still presents indexed2d at 0.117 ms average and runs Depth
+Well/Paddle Guard for 600 frames. Default consumers link at 1,796,312 bytes
+arm64 and 1,897,960 bytes x86_64; the opt-in SIMD pair links at 1,815,032 /
+1,910,544 bytes. All remain inside unchanged finite ceilings. The all-feature
+suite, full WABT/JavaScriptCore/H5 standard matrix and booted SIMD cartridge
+pass. The real Nostalgia Arcade consumer passes 13 cartridge unit tests, its
+two-game UI journey and an arm64 device Release build with the byte-identical
+ABI v1.13 archive. Physical-iPhone lifecycle/performance/audio and TestFlight
+install/play evidence remain open, so the persistent goal stays active.

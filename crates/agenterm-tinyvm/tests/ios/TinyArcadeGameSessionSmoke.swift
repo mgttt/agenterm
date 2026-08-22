@@ -158,25 +158,43 @@ private struct TinyArcadeGameSessionSmoke {
                 precondition(error.status == Int32(TINYARCADE_INVALID_ARGUMENT.rawValue))
             }
         }
-        let retainedFrame = try direct.tickMedia(buttons: 0, clockMilliseconds: 100)
-        let retainedRender = retainedFrame.render
-        let retainedAddress = retainedRender.withUnsafeBytes {
-            UInt(bitPattern: $0.baseAddress!)
+        func renderAddress(_ frame: TinyArcadeMediaFrame) -> UInt {
+            frame.render.withUnsafeBytes { UInt(bitPattern: $0.baseAddress!) }
         }
-        func ephemeralRenderAddress(clock: UInt32) throws -> UInt {
-            let ephemeral = try direct.tickMedia(buttons: 0, clockMilliseconds: clock)
-            return ephemeral.render.withUnsafeBytes { UInt(bitPattern: $0.baseAddress!) }
-        }
-        let detachedAddress = try ephemeralRenderAddress(clock: 101)
+
+        var current = try direct.tickMedia(buttons: 0, clockMilliseconds: 100)
+        let firstSlotAddress = renderAddress(current)
+        current = try direct.tickMedia(buttons: 0, clockMilliseconds: 101)
+        let secondSlotAddress = renderAddress(current)
+        precondition(firstSlotAddress != secondSlotAddress)
+        current = try direct.tickMedia(buttons: 0, clockMilliseconds: 102)
+        precondition(
+            renderAddress(current) == firstSlotAddress,
+            "the first output slot must be reusable while the previous frame is retained"
+        )
+        current = try direct.tickMedia(buttons: 0, clockMilliseconds: 103)
+        precondition(
+            renderAddress(current) == secondSlotAddress,
+            "the second output slot must be reusable while the previous frame is retained"
+        )
+
+        var retainedFrame: TinyArcadeMediaFrame? = current
+        let retainedAddress = renderAddress(retainedFrame!)
+        let retainedBytes = [UInt8](retainedFrame!.render)
+        current = try direct.tickMedia(buttons: 0, clockMilliseconds: 104)
+        current = try direct.tickMedia(buttons: 0, clockMilliseconds: 105)
+        let detachedAddress = renderAddress(current)
         precondition(
             detachedAddress != retainedAddress,
-            "a retained old frame must force copy-on-write output separation"
+            "an additionally retained history frame must force copy-on-write separation"
         )
-        precondition(retainedFrame.render == retainedRender)
-        let reusedAddress = try ephemeralRenderAddress(clock: 102)
+        precondition([UInt8](retainedFrame!.render) == retainedBytes)
+        retainedFrame = nil
+        current = try direct.tickMedia(buttons: 0, clockMilliseconds: 106)
+        current = try direct.tickMedia(buttons: 0, clockMilliseconds: 107)
         precondition(
-            reusedAddress == detachedAddress,
-            "released same-sized frame storage should be reused by the next tick"
+            renderAddress(current) == detachedAddress,
+            "a detached output slot must be reused after its transient frame is released"
         )
         try direct.close()
 

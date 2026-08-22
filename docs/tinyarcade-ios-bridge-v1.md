@@ -296,12 +296,16 @@ App adapter decodes its 64-byte state from the same completed frame, so its
 30 Hz render path remains a `.tick` lifecycle and does not allocate a portable
 snapshot or call `game_suspend` merely to update native UI/accessibility state.
 The C boundary still performs one required copy into Swift-owned immutable
-`Data`. The runtime retains one render and one audio `Data` buffer: when no
-older frame survives, the next same-sized copy reuses its allocation; when UI
-code retains an older frame, Swift copy-on-write separates the next output so
-the old value cannot change. A failed tick clears both logical outputs while
-retaining bounded capacity for recovery, and `close()` releases them. No Rust
-pointer crosses the copy call. `withPixelBytes` and
+`Data`. The runtime alternates through two render/audio `Data` slots. This
+matches native UI assignment semantics: while the currently displayed frame
+survives the call that produces its replacement, the other slot is writable;
+after two warm-up frames, equal-sized output reuses both allocations. The pool
+retains at most twice the configured render-plus-audio output bounds. If a
+caller retains additional frame history, Swift copy-on-write separates that
+occupied slot so the old value cannot change. A failed tick clears the selected
+slot's logical outputs while retaining bounded capacity for recovery, and
+`close()` releases the pool. No Rust pointer crosses the copy call.
+`withPixelBytes` and
 `withApplicationMetadataBytes` then lend scoped, read-only views into that
 owner for native decoding and RGBA conversion; their pointers cannot escape
 the closure. The zero-indexed `pixels` and
