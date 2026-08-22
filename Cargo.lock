@@ -203,6 +203,7 @@ dependencies = [
 name = "agenterm-tinyvm"
 version = "0.1.0"
 dependencies = [
+ "agenterm-tinyvm-qjs",
  "base64",
  "cap-std",
  "getrandom 0.4.3",

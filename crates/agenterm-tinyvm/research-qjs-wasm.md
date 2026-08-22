@@ -107,3 +107,5 @@ quickjs-wasi 一类 = 解释器编成 reactor wasm + 少量 import（WASI + host
 Cloudflare Workers 对照（只借概念，不 clone、不搬 V8/workerd/isolate 实现、不装完整 JS 引擎）：
 一份不可信程序一个隔离槽、槽互不见；JS/qjs 是语言皮；globals/locals 是宿主门不是 POSIX；
 上限（Limits / 核体积）在 tinyvm 核；容器/OS 是后加的宿主包装。eval_qjs = qjs2wasm（表达式糖 → MVP wasm）+ eval_wasm。
+
+本刀已交：`eval_wasm(data, globals, locals)` + `qjs2wasm` 名字/运算/零参调宿主；世界只在两本绑定。完整 JS 引擎仍排除。政委演示：`cargo run -p agenterm-tinyvm-qjs --example commissar`。

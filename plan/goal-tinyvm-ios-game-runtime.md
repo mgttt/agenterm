@@ -4498,8 +4498,8 @@ fixture, and tinyvm, JavaScriptCore and a real headless H5 browser agree on all
 240 scalar-bridge result bytes as well as the existing audio, mask and wrapping
 lane vectors. The reviewed cartridge executes every bridge family during
 `game_init`, and a focused booted iOS Simulator owner runs it through the public
-Swift/C ABI. The 147-claim executable PRD map and complete all-feature suite
-pass. Warnings-denied Clippy, rustfmt, ShellCheck, the ten-family standard
+Swift/C ABI. The merged 153-claim executable PRD map and complete all-feature
+suite pass. Warnings-denied Clippy, rustfmt, ShellCheck, the ten-family standard
 matrix and four-cartridge JSC/H5 differential also pass. Default and SIMD
 static cores are 101,256 and 117,800 bytes. Default iOS consumers link at
 1,795,576 bytes arm64 and 1,889,040 bytes x86_64; opt-in SIMD consumers link at

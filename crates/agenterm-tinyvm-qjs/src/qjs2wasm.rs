@@ -1,23 +1,27 @@
 //! Expression-level lowering to MVP wasm. Not a JS engine and not full JS AOT.
+//!
+//! Subset: names, integer arithmetic, grouping, and zero-arg host calls.
+//! The world is only the two [`eval_wasm`](agenterm_tinyvm::eval_wasm) bindings:
+//! host names → import table (`globals`), `$N` → this-call `locals`.
 
 use std::collections::BTreeSet;
 
 use agenterm_tinyvm::WasmError;
 
-enum Atom {
-    Int(i32),
-    Host(String),
-    Local(u32),
-}
-
 enum BinOp {
     Add,
     Sub,
+    Mul,
+    Div,
+    Rem,
 }
 
-struct Expr {
-    atoms: Vec<Atom>,
-    ops: Vec<BinOp>,
+enum Expr {
+    Int(i32),
+    Host(String),
+    Local(u32),
+    Neg(Box<Expr>),
+    Bin(BinOp, Box<Expr>, Box<Expr>),
 }
 
 struct Parsed {
@@ -28,9 +32,10 @@ struct Parsed {
 
 /// Pack one expression into a standard `.wasm` guest.
 ///
-/// Sugar: decimal integers, `+` / `-`, host names (`g` → import `js.g`),
-/// and `$0`/`$1`/… for this-call locals. Anything that needs a JS runtime
-/// (calls, functions, objects, `eval`) is rejected.
+/// Sugar: decimal integers; `+` `-` `*` `/` `%`; grouping `()`; host names
+/// (`g` or `g()` → import `js.g`); `$0`/`$1`/… for this-call locals.
+/// Host calls take no arguments — that would be a third world.
+/// Anything that needs a JS runtime is rejected.
 pub fn qjs2wasm(source: &str) -> Result<Vec<u8>, WasmError> {
     if source.len() > 256 {
         return Err(WasmError::Decode("expression too long"));
@@ -40,35 +45,22 @@ pub fn qjs2wasm(source: &str) -> Result<Vec<u8>, WasmError> {
 }
 
 fn parse(source: &str) -> Result<Parsed, WasmError> {
-    let bytes = source.as_bytes();
-    let mut i = 0usize;
-    skip_ws(bytes, &mut i);
-    if i >= bytes.len() {
+    let mut p = Parser {
+        bytes: source.as_bytes(),
+        i: 0,
+    };
+    p.skip_ws();
+    if p.i >= p.bytes.len() {
         return Err(WasmError::Decode("empty expression"));
     }
-    let mut expr = Expr {
-        atoms: Vec::new(),
-        ops: Vec::new(),
-    };
+    let expr = p.expr()?;
+    p.skip_ws();
+    if p.i < p.bytes.len() {
+        return Err(WasmError::Decode("not an expression subset"));
+    }
     let mut hosts = BTreeSet::new();
     let mut n_locals = 0u32;
-    expr.atoms
-        .push(parse_atom(bytes, &mut i, &mut hosts, &mut n_locals)?);
-    loop {
-        skip_ws(bytes, &mut i);
-        if i >= bytes.len() {
-            break;
-        }
-        let op = match bytes[i] {
-            b'+' => BinOp::Add,
-            b'-' => BinOp::Sub,
-            _ => return Err(WasmError::Decode("not an expression subset")),
-        };
-        i += 1;
-        expr.ops.push(op);
-        expr.atoms
-            .push(parse_atom(bytes, &mut i, &mut hosts, &mut n_locals)?);
-    }
+    collect(&expr, &mut hosts, &mut n_locals);
     Ok(Parsed {
         expr,
         hosts: hosts.into_iter().collect(),
@@ -76,100 +68,229 @@ fn parse(source: &str) -> Result<Parsed, WasmError> {
     })
 }
 
-fn parse_atom(
-    bytes: &[u8],
-    i: &mut usize,
-    hosts: &mut BTreeSet<String>,
-    n_locals: &mut u32,
-) -> Result<Atom, WasmError> {
-    skip_ws(bytes, i);
-    if *i >= bytes.len() {
-        return Err(WasmError::Decode("truncated expression"));
+struct Parser<'a> {
+    bytes: &'a [u8],
+    i: usize,
+}
+
+impl Parser<'_> {
+    fn skip_ws(&mut self) {
+        while self.i < self.bytes.len()
+            && matches!(self.bytes[self.i], b' ' | b'\t' | b'\n' | b'\r')
+        {
+            self.i += 1;
+        }
     }
-    match bytes[*i] {
-        b'(' | b')' | b'{' | b'}' | b'[' | b']' | b'"' | b'\'' | b'`' | b'.' | b'=' | b';' => {
-            Err(WasmError::Decode("not an expression subset"))
+
+    fn peek(&self) -> Option<u8> {
+        self.bytes.get(self.i).copied()
+    }
+
+    fn bump(&mut self) {
+        self.i += 1;
+    }
+
+    fn expr(&mut self) -> Result<Expr, WasmError> {
+        let mut left = self.term()?;
+        loop {
+            self.skip_ws();
+            let op = match self.peek() {
+                Some(b'+') => BinOp::Add,
+                Some(b'-') => BinOp::Sub,
+                _ => break,
+            };
+            self.bump();
+            let right = self.term()?;
+            left = Expr::Bin(op, Box::new(left), Box::new(right));
         }
-        b'$' => {
-            *i += 1;
-            let n = parse_index(bytes, i)?;
-            *n_locals = (*n_locals).max(n + 1);
-            Ok(Atom::Local(n))
+        Ok(left)
+    }
+
+    fn term(&mut self) -> Result<Expr, WasmError> {
+        let mut left = self.unary()?;
+        loop {
+            self.skip_ws();
+            let op = match self.peek() {
+                Some(b'*') => BinOp::Mul,
+                Some(b'/') => BinOp::Div,
+                Some(b'%') => BinOp::Rem,
+                _ => break,
+            };
+            self.bump();
+            let right = self.unary()?;
+            left = Expr::Bin(op, Box::new(left), Box::new(right));
         }
-        b'0'..=b'9' | b'-' => Ok(Atom::Int(parse_i32(bytes, i)?)),
-        b'A'..=b'Z' | b'a'..=b'z' | b'_' => {
-            let name = parse_ident(bytes, i)?;
-            if name == "function" || name == "eval" || name == "return" || name == "var" {
-                return Err(WasmError::Decode("full JS is not a converter"));
+        Ok(left)
+    }
+
+    fn unary(&mut self) -> Result<Expr, WasmError> {
+        self.skip_ws();
+        if self.peek() == Some(b'-') {
+            self.bump();
+            return Ok(Expr::Neg(Box::new(self.unary()?)));
+        }
+        self.atom()
+    }
+
+    fn atom(&mut self) -> Result<Expr, WasmError> {
+        self.skip_ws();
+        match self.peek() {
+            None => Err(WasmError::Decode("truncated expression")),
+            Some(b'(') => {
+                self.bump();
+                let inner = self.expr()?;
+                self.skip_ws();
+                if self.peek() != Some(b')') {
+                    return Err(WasmError::Decode("not an expression subset"));
+                }
+                self.bump();
+                Ok(inner)
             }
-            hosts.insert(name.clone());
-            Ok(Atom::Host(name))
+            Some(b'{' | b'}' | b'[' | b']' | b'.') => {
+                Err(WasmError::Decode("third world; world is in two bindings"))
+            }
+            Some(
+                b')' | b'"' | b'\'' | b'`' | b'=' | b';' | b',' | b'!' | b'&' | b'|' | b'<' | b'>'
+                | b'?',
+            ) => Err(WasmError::Decode("not an expression subset")),
+            Some(b'$') => {
+                self.bump();
+                Ok(Expr::Local(self.index()?))
+            }
+            Some(b'0'..=b'9') => Ok(Expr::Int(self.unsigned_i32()?)),
+            Some(b'A'..=b'Z' | b'a'..=b'z' | b'_') => self.host_name(),
+            Some(_) => Err(WasmError::Decode("not an expression subset")),
         }
-        _ => Err(WasmError::Decode("not an expression subset")),
+    }
+
+    fn host_name(&mut self) -> Result<Expr, WasmError> {
+        let name = self.ident()?;
+        if is_js_keyword(&name) {
+            return Err(WasmError::Decode("full JS is not a converter"));
+        }
+        self.skip_ws();
+        match self.peek() {
+            Some(b'(') => {
+                self.bump();
+                self.skip_ws();
+                if self.peek() != Some(b')') {
+                    return Err(WasmError::Decode(
+                        "host call takes no args; world is in two bindings",
+                    ));
+                }
+                self.bump();
+            }
+            Some(b'.' | b'[') => {
+                return Err(WasmError::Decode("third world; world is in two bindings"));
+            }
+            _ => {}
+        }
+        Ok(Expr::Host(name))
+    }
+
+    fn ident(&mut self) -> Result<String, WasmError> {
+        let start = self.i;
+        self.bump();
+        while self.i < self.bytes.len()
+            && matches!(self.bytes[self.i], b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_')
+        {
+            self.i += 1;
+        }
+        if self.i - start > 32 {
+            return Err(WasmError::Decode("name too long"));
+        }
+        core::str::from_utf8(&self.bytes[start..self.i])
+            .map(String::from)
+            .map_err(|_| WasmError::Decode("name"))
+    }
+
+    fn index(&mut self) -> Result<u32, WasmError> {
+        if !self.peek().is_some_and(|b| b.is_ascii_digit()) {
+            return Err(WasmError::Decode("local index"));
+        }
+        let mut n = 0u32;
+        while let Some(b) = self.peek() {
+            if !b.is_ascii_digit() {
+                break;
+            }
+            n = n
+                .checked_mul(10)
+                .and_then(|v| v.checked_add(u32::from(b - b'0')))
+                .ok_or(WasmError::Decode("local index"))?;
+            self.bump();
+        }
+        if n > 16 {
+            return Err(WasmError::Decode("local index"));
+        }
+        Ok(n)
+    }
+
+    fn unsigned_i32(&mut self) -> Result<i32, WasmError> {
+        if !self.peek().is_some_and(|b| b.is_ascii_digit()) {
+            return Err(WasmError::Decode("integer"));
+        }
+        let mut n = 0i32;
+        let mut any = false;
+        while let Some(b) = self.peek() {
+            if !b.is_ascii_digit() {
+                break;
+            }
+            any = true;
+            n = n
+                .checked_mul(10)
+                .and_then(|v| v.checked_add(i32::from(b - b'0')))
+                .ok_or(WasmError::Decode("integer"))?;
+            self.bump();
+        }
+        if !any {
+            return Err(WasmError::Decode("integer"));
+        }
+        Ok(n)
     }
 }
 
-fn parse_ident(bytes: &[u8], i: &mut usize) -> Result<String, WasmError> {
-    let start = *i;
-    *i += 1;
-    while *i < bytes.len() && matches!(bytes[*i], b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_') {
-        *i += 1;
-    }
-    if *i - start > 32 {
-        return Err(WasmError::Decode("name too long"));
-    }
-    core::str::from_utf8(&bytes[start..*i])
-        .map(String::from)
-        .map_err(|_| WasmError::Decode("name"))
+fn is_js_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "function"
+            | "eval"
+            | "return"
+            | "var"
+            | "let"
+            | "const"
+            | "class"
+            | "new"
+            | "this"
+            | "typeof"
+            | "instanceof"
+            | "import"
+            | "export"
+            | "async"
+            | "await"
+            | "yield"
+            | "with"
+            | "delete"
+            | "undefined"
+            | "null"
+            | "true"
+            | "false"
+    )
 }
 
-fn parse_index(bytes: &[u8], i: &mut usize) -> Result<u32, WasmError> {
-    if *i >= bytes.len() || !bytes[*i].is_ascii_digit() {
-        return Err(WasmError::Decode("local index"));
-    }
-    let mut n = 0u32;
-    while *i < bytes.len() && bytes[*i].is_ascii_digit() {
-        n = n
-            .checked_mul(10)
-            .and_then(|v| v.checked_add(u32::from(bytes[*i] - b'0')))
-            .ok_or(WasmError::Decode("local index"))?;
-        *i += 1;
-    }
-    if n > 16 {
-        return Err(WasmError::Decode("local index"));
-    }
-    Ok(n)
-}
-
-fn parse_i32(bytes: &[u8], i: &mut usize) -> Result<i32, WasmError> {
-    let neg = if bytes.get(*i) == Some(&b'-') {
-        *i += 1;
-        true
-    } else {
-        false
-    };
-    if *i >= bytes.len() || !bytes[*i].is_ascii_digit() {
-        return Err(WasmError::Decode("integer"));
-    }
-    let mut n = 0i32;
-    let mut any = false;
-    while *i < bytes.len() && bytes[*i].is_ascii_digit() {
-        any = true;
-        n = n
-            .checked_mul(10)
-            .and_then(|v| v.checked_add(i32::from(bytes[*i] - b'0')))
-            .ok_or(WasmError::Decode("integer"))?;
-        *i += 1;
-    }
-    if !any {
-        return Err(WasmError::Decode("integer"));
-    }
-    Ok(if neg { -n } else { n })
-}
-
-fn skip_ws(bytes: &[u8], i: &mut usize) {
-    while *i < bytes.len() && matches!(bytes[*i], b' ' | b'\t' | b'\n' | b'\r') {
-        *i += 1;
+fn collect(expr: &Expr, hosts: &mut BTreeSet<String>, n_locals: &mut u32) {
+    match expr {
+        Expr::Int(_) => {}
+        Expr::Host(name) => {
+            hosts.insert(name.clone());
+        }
+        Expr::Local(n) => {
+            *n_locals = (*n_locals).max(n + 1);
+        }
+        Expr::Neg(inner) => collect(inner, hosts, n_locals),
+        Expr::Bin(_, a, b) => {
+            collect(a, hosts, n_locals);
+            collect(b, hosts, n_locals);
+        }
     }
 }
 
@@ -215,7 +336,7 @@ fn encode(parsed: &Parsed) -> Vec<u8> {
 
     let mut body = Vec::new();
     body.push(0x00);
-    emit_expr(&mut body, parsed);
+    emit_expr(&mut body, parsed, &parsed.expr);
     body.push(0x0B);
     let mut code = Vec::new();
     push_uleb(&mut code, 1);
@@ -245,32 +366,41 @@ fn emit_functype(out: &mut Vec<u8>, n_params: u32, n_results: u32) {
     }
 }
 
-fn emit_expr(out: &mut Vec<u8>, parsed: &Parsed) {
-    for (idx, atom) in parsed.expr.atoms.iter().enumerate() {
-        match atom {
-            Atom::Int(n) => {
-                out.push(0x41);
-                push_sleb_i32(out, *n);
-            }
-            Atom::Host(name) => {
-                let host_index = parsed
-                    .hosts
-                    .iter()
-                    .position(|h| h == name)
-                    .expect("host collected");
-                out.push(0x10);
-                push_uleb(out, host_index as u32);
-            }
-            Atom::Local(n) => {
-                out.push(0x20);
-                push_uleb(out, *n);
-            }
+fn emit_expr(out: &mut Vec<u8>, parsed: &Parsed, expr: &Expr) {
+    match expr {
+        Expr::Int(n) => {
+            out.push(0x41);
+            push_sleb_i32(out, *n);
         }
-        if idx > 0 {
-            match parsed.expr.ops[idx - 1] {
-                BinOp::Add => out.push(0x6A),
-                BinOp::Sub => out.push(0x6B),
-            }
+        Expr::Host(name) => {
+            let host_index = parsed
+                .hosts
+                .iter()
+                .position(|h| h == name)
+                .expect("host collected");
+            out.push(0x10);
+            push_uleb(out, host_index as u32);
+        }
+        Expr::Local(n) => {
+            out.push(0x20);
+            push_uleb(out, *n);
+        }
+        Expr::Neg(inner) => {
+            out.push(0x41);
+            push_sleb_i32(out, 0);
+            emit_expr(out, parsed, inner);
+            out.push(0x6B);
+        }
+        Expr::Bin(op, a, b) => {
+            emit_expr(out, parsed, a);
+            emit_expr(out, parsed, b);
+            out.push(match op {
+                BinOp::Add => 0x6A,
+                BinOp::Sub => 0x6B,
+                BinOp::Mul => 0x6C,
+                BinOp::Div => 0x6D,
+                BinOp::Rem => 0x6F,
+            });
         }
     }
 }

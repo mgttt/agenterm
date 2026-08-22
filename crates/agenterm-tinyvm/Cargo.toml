@@ -19,6 +19,7 @@ getrandom = { version = "0.4", optional = true }
 [dev-dependencies]
 tempfile = "3.25"
 wat = "1"
+agenterm-tinyvm-qjs = { path = "../agenterm-tinyvm-qjs" }
 
 [features]
 staticcore = []

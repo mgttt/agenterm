@@ -2276,6 +2276,11 @@ originating in a guest or persisted snapshot, first `try_reserve_exact` the
 bounded addition and map refusal to the runtime's ordinary error path; only
 then extend. A small configured limit is policy, not allocation evidence.
 
+tinyvm public values are fmt-free: `Val` and `WasmError` derive `Debug` only
+under `cfg(test)` of that crate. Examples, doctests and other packages cannot
+`unwrap()`, `assert_eq!` or `{:?}` them. Match the `Ok` payload, and print
+`WasmError::message()`.
+
 ## Versioned media needs one discriminated SDK boundary
 
 When one guest output channel accepts multiple versioned media schemas, do not
