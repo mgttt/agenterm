@@ -638,8 +638,32 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 146] = [
+const LEAF_TESTS: [(&str, &str); 152] = [
     ("eval(bytes)", "eval_bytes"),
+    (
+        "eval_wasm(data, globals, locals)",
+        "eval_wasm_sends_globals_and_locals_to_the_host_door",
+    ),
+    (
+        "eval / eval_with aliases",
+        "eval_and_eval_with_remain_callable_aliases",
+    ),
+    (
+        "language skin (agenterm-tinyvm-qjs)",
+        "language_skin_is_qjs2wasm_over_eval_wasm",
+    ),
+    (
+        "qjs2wasm names / ops / host-call subset",
+        "qjs2wasm_names_ops_host_call",
+    ),
+    (
+        "eval_qjs = eval_wasm(qjs2wasm, globals, locals)",
+        "eval_qjs_is_qjs2wasm_then_eval_wasm",
+    ),
+    (
+        "commissar demo (example commissar)",
+        "commissar_demo_eval_wasm_and_sugar",
+    ),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
     ("JIT native code", "native_interpreter_boundary"),

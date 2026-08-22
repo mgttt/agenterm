@@ -70,18 +70,75 @@ fn eval_wasm_sends_globals_and_locals_to_the_host_door() {
     );
 }
 
+fn const_17_wasm() -> Vec<u8> {
+    wat::parse_str(r#"(module (func (export "main") (result i32) i32.const 17))"#)
+        .unwrap_or_else(|e| panic!("const 17 fixture: {e}"))
+}
+
+fn must_decode(data: &[u8], what: &str) {
+    match eval_wasm(data, &[], &[]) {
+        Err(WasmError::Decode(_)) => {}
+        Err(e) => panic!("{what}: expected Decode, got {}", e.message()),
+        Ok(_) => panic!("{what}: eval_wasm must not eat non-wasm"),
+    }
+}
+
+#[test]
+fn eval_wasm_eats_only_wasm() {
+    must_decode(b"1+1", "JS-like arithmetic");
+    must_decode(
+        b"(module (func (export \"main\") (result i32) i32.const 17))",
+        "WAT text",
+    );
+    must_decode(b"function(){return 1}", "JS source");
+    must_decode(b"", "empty");
+    must_decode(b"\0asm", "truncated magic");
+    must_i32(
+        eval_wasm(&const_17_wasm(), &[], &[]),
+        17,
+        "standard wasm bytes",
+    );
+}
+
 #[test]
 fn eval_and_eval_with_remain_callable_aliases() {
-    let wasm = wat::parse_str(r#"(module (func (export "main") (result i32) i32.const 17))"#)
-        .unwrap_or_else(|e| panic!("const 17 fixture: {e}"));
+    let wasm = const_17_wasm();
     must_i32(eval(&wasm), 17, "eval alias");
     must_i32(eval_with(&wasm, Limits::default()), 17, "eval_with alias");
+    match (eval(&wasm), eval_wasm(&wasm, &[], &[])) {
+        (Ok(a), Ok(b)) if a == b => {}
+        _ => panic!("eval(bytes) must be eval_wasm(bytes, &[], &[])"),
+    }
+    match (
+        eval_with(&wasm, Limits::default()),
+        eval_wasm(&wasm, &[], &[]),
+    ) {
+        (Ok(a), Ok(b)) if a == b => {}
+        _ => panic!("eval_with empty-gate must match eval_wasm"),
+    }
 }
 
 #[test]
 fn eval_wasm_rejects_non_wasm_data() {
-    assert!(matches!(
-        eval_wasm(b"1+1", &[], &[]),
-        Err(WasmError::Decode(_))
-    ));
+    must_decode(b"1+1", "1+1");
+}
+
+#[test]
+fn eval_wasm_unbound_import_traps() {
+    let wasm = import_add_wasm();
+    match eval_wasm(&wasm, &[], &[Val::I32(2)]) {
+        Err(WasmError::Trap(_)) => {}
+        Err(e) => panic!("unbound import: expected Trap, got {}", e.message()),
+        Ok(_) => panic!("unbound import must not run"),
+    }
+    match eval_wasm(
+        &wasm,
+        &[HostGlobal::new("js", "g", Val::I32(40))],
+        &[Val::I32(2)],
+    ) {
+        Ok(vals) if matches!(vals.as_slice(), [Val::I32(42)]) => {
+            panic!("wrong module is not the host door")
+        }
+        Ok(_) | Err(_) => {}
+    }
 }

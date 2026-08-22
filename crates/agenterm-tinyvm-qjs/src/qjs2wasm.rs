@@ -146,9 +146,12 @@ impl Parser<'_> {
                 self.bump();
                 Ok(inner)
             }
+            Some(b'{' | b'}' | b'[' | b']' | b'.') => {
+                Err(WasmError::Decode("third world; world is in two bindings"))
+            }
             Some(
-                b')' | b'{' | b'}' | b'[' | b']' | b'"' | b'\'' | b'`' | b'.' | b'=' | b';' | b','
-                | b'!' | b'&' | b'|' | b'<' | b'>' | b'?',
+                b')' | b'"' | b'\'' | b'`' | b'=' | b';' | b',' | b'!' | b'&' | b'|' | b'<' | b'>'
+                | b'?',
             ) => Err(WasmError::Decode("not an expression subset")),
             Some(b'$') => {
                 self.bump();
@@ -166,15 +169,21 @@ impl Parser<'_> {
             return Err(WasmError::Decode("full JS is not a converter"));
         }
         self.skip_ws();
-        if self.peek() == Some(b'(') {
-            self.bump();
-            self.skip_ws();
-            if self.peek() != Some(b')') {
-                return Err(WasmError::Decode(
-                    "host call takes no args; world is in two bindings",
-                ));
+        match self.peek() {
+            Some(b'(') => {
+                self.bump();
+                self.skip_ws();
+                if self.peek() != Some(b')') {
+                    return Err(WasmError::Decode(
+                        "host call takes no args; world is in two bindings",
+                    ));
+                }
+                self.bump();
             }
-            self.bump();
+            Some(b'.' | b'[') => {
+                return Err(WasmError::Decode("third world; world is in two bindings"));
+            }
+            _ => {}
         }
         Ok(Expr::Host(name))
     }
