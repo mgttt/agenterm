@@ -4620,3 +4620,40 @@ consuming the exact current archive (SHA-256
 No physical iPhone is connected; physical lifecycle/performance/audio and
 TestFlight install/play evidence remain open, so the persistent goal stays
 active.
+
+## One-hundred-forty-ninth executable increment — replay-gated catalog publication
+
+The strict catalog source schema 2 now requires a `replay` path beside every
+`wasm` path. Source schema 1 is rejected rather than silently reinterpreted;
+the emitted App-facing catalog remains schema 1. Before creating a signature,
+the offline publisher still checks the exact
+TAH1 host profile and fixed lifecycle/media/snapshot contract, then reads the
+bounded TAR1 artifact and calls the same structured byte-level replay checker
+used by `replay check --json`. This removes the previous evidence gap where the
+publisher's phrase “deterministic replay” meant only a fixed zero-button probe,
+not an author-selected gameplay route.
+
+A canonical but zero-frame trace now fails the stable `replay_coverage` stage;
+representative evidence must execute at least one input/clock step. Missing,
+malformed, hash/identity-mismatched, initialization-failing or frame-drifted
+traces all fail before signing. Review replays are not copied into the runtime
+catalog directory, so the stronger operator gate does not enlarge the app's
+download surface. Any rejection removes the private sibling staging directory
+and leaves neither a visible destination nor hidden partial publication.
+
+Evidence on 2026-08-22: a black-box `tinyvm catalog build` publishes real Depth
+Well only with its exact three-frame move/drop replay, omits the `.tareplay`
+from output, and rejects a tampered digest with `replay_execution` while proving
+both destination and staging cleanup. The publisher's reproducibility test uses
+a real Paddle Guard route and independently rejects an incompatible host
+profile, changed cartridge, drifted replay and missing replay. The replay CLI
+also proves zero-frame rejection. The 157-claim executable PRD map, complete
+all-feature suite, warnings-denied Clippy, rustfmt, no-default and
+catalog-publisher-only builds, full standard-feature matrix and unchanged
+101,256-byte default core pass. Default/SIMD iOS linked sizes remain within the
+existing ceilings. The real Nostalgia Arcade consumer again passes 13 unit
+tests, the two-cartridge UI journey and an arm64 device Release build while
+consuming the exact current archive (SHA-256
+`582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`).
+Physical-iPhone lifecycle/performance/audio and TestFlight install/play evidence
+remain open, so the persistent goal stays active.

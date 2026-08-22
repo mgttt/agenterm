@@ -63,8 +63,10 @@ tinyarcade-replay-conformance-report
 ```
 
 Failure stages are stable schema values: `cartridge_input`, `replay_input`,
-`replay_decode`, `cartridge_binding`, `initialization` and
-`replay_execution`. `replay_valid=true` means only that the complete trace
+`replay_decode`, `replay_coverage`, `cartridge_binding`, `initialization` and
+`replay_execution`. `replay_coverage` rejects a canonical but zero-frame trace;
+representative evidence must execute at least one input/clock step.
+`replay_valid=true` means only that the complete trace
 decoded under TAR1 bounds. `cartridge_bound=false` means an exact hash or
 manifest identity mismatch was observed; it is `null` before binding could be
 evaluated. `evidence` is present only after every frame matched, so a partial
@@ -86,3 +88,8 @@ approve a game. It proves deterministic execution only for the recorded input
 and clock sequence. Creator CI should keep meaningful traces for core gameplay
 routes and every fixed regression, then use the development JSC/H5 oracle when
 cross-engine evidence is required.
+
+The offline catalog publisher requires one passing representative trace per
+source game before signing. It calls the same structured checker rather than a
+publisher-only replay implementation, and never copies the review trace into
+the runtime catalog output.

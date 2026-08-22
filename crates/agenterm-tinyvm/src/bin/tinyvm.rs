@@ -332,71 +332,29 @@ fn run_replay_check(wasm_path: &str, trace_path: &str, format: ReportFormat) -> 
             );
         }
     };
-    let trace = match ReplayTraceV1::decode(&trace_bytes) {
-        Ok(trace) => trace,
-        Err(error) => {
+    let report = match check_replay_bytes(&wasm, &trace_bytes) {
+        Ok(report) => report,
+        Err(failure) => {
             return replay_check_failure(
                 format,
                 Some(&wasm),
                 Some(&trace_bytes),
-                None,
-                "replay_decode",
-                error.message(),
-                None,
+                failure.trace.as_deref(),
+                failure.stage,
+                &failure.message,
+                failure.cartridge_bound,
             );
         }
     };
-    if let Err(error) = trace.verify_cartridge(&wasm) {
-        return replay_check_failure(
-            format,
-            Some(&wasm),
-            Some(&trace_bytes),
-            Some(&trace),
-            "cartridge_binding",
-            error.message(),
-            Some(false),
-        );
-    }
-    let mut runtime = match replay_runtime(&wasm) {
-        Ok(runtime) => runtime,
-        Err(message) => {
-            return replay_check_failure(
-                format,
-                Some(&wasm),
-                Some(&trace_bytes),
-                Some(&trace),
-                "initialization",
-                &message,
-                Some(true),
-            );
-        }
-    };
-    let mut evidence = ReplayConformanceEvidence::default();
-    if let Err(error) = trace.replay(&wasm, &mut runtime, |_, frame| {
-        evidence.verified_frames += 1;
-        evidence.total_render_bytes += frame.render.len() as u64;
-        evidence.total_audio_bytes += frame.audio.len() as u64;
-        Ok(())
-    }) {
-        return replay_check_failure(
-            format,
-            Some(&wasm),
-            Some(&trace_bytes),
-            Some(&trace),
-            "replay_execution",
-            error.message(),
-            Some(true),
-        );
-    }
     match format {
         ReportFormat::Json => println!(
             "{}",
-            replay_conformance_report_json(&wasm, &trace_bytes, &trace, evidence)
+            replay_conformance_report_json(&wasm, &trace_bytes, &report.trace, report.evidence,)
         ),
         ReportFormat::Text => {
-            println!("game_id={}", trace.game_id);
-            println!("game_version={}", trace.game_version);
-            println!("verified_frames={}", evidence.verified_frames);
+            println!("game_id={}", report.trace.game_id);
+            println!("game_version={}", report.trace.game_version);
+            println!("verified_frames={}", report.evidence.verified_frames);
             println!("OK: replay matches exact cartridge outputs");
         }
     }
@@ -409,6 +367,75 @@ struct ReplayConformanceEvidence {
     verified_frames: usize,
     total_render_bytes: u64,
     total_audio_bytes: u64,
+}
+
+#[cfg(feature = "replay")]
+struct ReplayConformanceReport {
+    trace: ReplayTraceV1,
+    evidence: ReplayConformanceEvidence,
+}
+
+#[cfg(feature = "replay")]
+struct ReplayConformanceFailure {
+    trace: Option<Box<ReplayTraceV1>>,
+    stage: &'static str,
+    message: String,
+    cartridge_bound: Option<bool>,
+}
+
+#[cfg(feature = "replay")]
+fn check_replay_bytes(
+    wasm: &[u8],
+    trace_bytes: &[u8],
+) -> Result<ReplayConformanceReport, ReplayConformanceFailure> {
+    let trace = ReplayTraceV1::decode(trace_bytes).map_err(|error| ReplayConformanceFailure {
+        trace: None,
+        stage: "replay_decode",
+        message: error.message().to_string(),
+        cartridge_bound: None,
+    })?;
+    if trace.steps.is_empty() {
+        return Err(ReplayConformanceFailure {
+            trace: Some(Box::new(trace)),
+            stage: "replay_coverage",
+            message: "representative replay has no frames".into(),
+            cartridge_bound: None,
+        });
+    }
+    if let Err(error) = trace.verify_cartridge(wasm) {
+        return Err(ReplayConformanceFailure {
+            trace: Some(Box::new(trace)),
+            stage: "cartridge_binding",
+            message: error.message().to_string(),
+            cartridge_bound: Some(false),
+        });
+    }
+    let mut runtime = match replay_runtime(wasm) {
+        Ok(runtime) => runtime,
+        Err(message) => {
+            return Err(ReplayConformanceFailure {
+                trace: Some(Box::new(trace)),
+                stage: "initialization",
+                message,
+                cartridge_bound: Some(true),
+            });
+        }
+    };
+    let mut evidence = ReplayConformanceEvidence::default();
+    if let Err(error) = trace.replay(wasm, &mut runtime, |_, frame| {
+        evidence.verified_frames += 1;
+        evidence.total_render_bytes += frame.render.len() as u64;
+        evidence.total_audio_bytes += frame.audio.len() as u64;
+        Ok(())
+    }) {
+        return Err(ReplayConformanceFailure {
+            trace: Some(Box::new(trace)),
+            stage: "replay_execution",
+            message: error.message().to_string(),
+            cartridge_bound: Some(true),
+        });
+    }
+    Ok(ReplayConformanceReport { trace, evidence })
 }
 
 #[cfg(feature = "replay")]
@@ -681,6 +708,7 @@ struct CatalogSource {
 #[serde(deny_unknown_fields)]
 struct SourceGame {
     wasm: String,
+    replay: String,
     title: String,
     summary: String,
     #[serde(default)]
@@ -756,7 +784,7 @@ fn build_catalog(source_path: &Path, seed_path: &Path, output: &Path) -> Result<
     let source_bytes = read_bounded_regular(source_path, 1024 * 1024, "catalog source")?;
     let source: CatalogSource =
         serde_json::from_slice(&source_bytes).map_err(|_| "invalid catalog source JSON")?;
-    if source.schema_version != 1
+    if source.schema_version != 2
         || !valid_identifier(&source.catalog_id, 128)
         || !valid_identifier(&source.signing_key_id, 64)
         || source.games.is_empty()
@@ -806,6 +834,17 @@ fn build_catalog(source_path: &Path, seed_path: &Path, output: &Path) -> Result<
                 .inspect_cartridge(&wasm)
                 .map_err(|error| error.message().to_string())?;
             let manifest = validate_publishable_cartridge(&wasm)?;
+            let replay = read_bounded_regular(
+                &source_dir.join(&game.replay),
+                MAX_REPLAY_BYTES as u64,
+                "representative replay",
+            )?;
+            check_replay_bytes(&wasm, &replay).map_err(|failure| {
+                format!(
+                    "representative replay {}: {}",
+                    failure.stage, failure.message
+                )
+            })?;
             if !valid_identifier(&manifest.game_id, 128) || !valid_version(&manifest.game_version) {
                 return Err("cartridge identity is incompatible with catalog v1".into());
             }
@@ -1931,6 +1970,20 @@ mod publisher_tests {
         .status()
         .expect("run cartridge builder");
         assert!(status.success());
+        let wasm_bytes = std::fs::read(&wasm).expect("read publisher cartridge");
+        let replay = temp.path().join("game.tareplay");
+        let mut replayed = replay_runtime(&wasm_bytes).expect("open publisher replay runtime");
+        let mut recorder = ReplayRecorderV1::start(&wasm_bytes, &mut replayed)
+            .unwrap_or_else(|error| panic!("start publisher replay: {}", error.message()));
+        for (buttons, clock_ms) in [(1 << 4, 0), (0, 0), (1, 16), (1 << 1, 32)] {
+            recorder
+                .record_tick(&mut replayed, GameInput { buttons, clock_ms })
+                .unwrap_or_else(|error| panic!("record publisher replay: {}", error.message()));
+        }
+        let replay_bytes = recorder
+            .finish()
+            .unwrap_or_else(|error| panic!("finish publisher replay: {}", error.message()));
+        std::fs::write(&replay, &replay_bytes).expect("write publisher replay");
 
         let seed = temp.path().join("catalog.seed");
         let secret = [0x5au8; 32];
@@ -1951,12 +2004,13 @@ mod publisher_tests {
         std::fs::write(
             &source,
             r#"{
-              "schema_version": 1,
+              "schema_version": 2,
               "catalog_id": "tinyarcade.test",
               "signing_key_id": "test-2026",
               "host_profile": "ios-build.tahost",
               "games": [{
                 "wasm": "game.wasm",
+                "replay": "game.tareplay",
                 "title": "Paddle Guard",
                 "summary": "A bounded test cartridge.",
                 "localizations": {"zh-Hans": {"title": "挡板守卫", "summary": "有边界的测试卡带。"}}
@@ -2006,7 +2060,11 @@ mod publisher_tests {
         assert_eq!(
             std::fs::read(first.join("com.partnernet.paddle-guard-0.1.0.wasm"))
                 .expect("read staged wasm"),
-            std::fs::read(&wasm).expect("read source wasm")
+            wasm_bytes
+        );
+        assert!(
+            !first.join("game.tareplay").exists(),
+            "review replay is evidence, not a runtime catalog object"
         );
 
         let tight_profile = HostProfileV1::new(
@@ -2023,6 +2081,48 @@ mod publisher_tests {
         let incompatible = temp.path().join("incompatible-publish");
         assert!(build_catalog(&source, &seed, &incompatible).is_err());
         assert!(!incompatible.exists());
+
+        std::fs::write(&profile_path, &profile).expect("restore compatible profile");
+        let mut mismatched_wasm = wasm_bytes.clone();
+        mismatched_wasm.extend_from_slice(&[0, 1, 0]);
+        std::fs::write(&wasm, mismatched_wasm).expect("write changed publisher cartridge");
+        let mismatched = temp.path().join("mismatched-replay-publish");
+        let mismatch = build_catalog(&source, &seed, &mismatched).expect_err("reject mismatch");
+        assert!(mismatch.contains("representative replay cartridge_binding"));
+        assert!(!mismatched.exists());
+
+        std::fs::write(&wasm, &wasm_bytes).expect("restore publisher cartridge");
+        let mut drifted_replay = replay_bytes.clone();
+        *drifted_replay.last_mut().expect("replay digest") ^= 1;
+        std::fs::write(&replay, drifted_replay).expect("write drifted publisher replay");
+        let drifted = temp.path().join("drifted-replay-publish");
+        let drift = build_catalog(&source, &seed, &drifted).expect_err("reject replay drift");
+        assert!(drift.contains("representative replay replay_execution"));
+        assert!(!drifted.exists());
+
+        std::fs::remove_file(&replay).expect("remove publisher replay");
+        let missing = temp.path().join("missing-replay-publish");
+        let missing_error =
+            build_catalog(&source, &seed, &missing).expect_err("reject missing replay");
+        assert!(missing_error.contains("cannot stat representative replay"));
+        assert!(!missing.exists());
+
+        let mut legacy_source: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&source).expect("read publisher source for version test"),
+        )
+        .expect("decode publisher source for version test");
+        legacy_source["schema_version"] = serde_json::json!(1);
+        std::fs::write(
+            &source,
+            serde_json::to_vec(&legacy_source).expect("encode legacy publisher source"),
+        )
+        .expect("write legacy publisher source");
+        let legacy = temp.path().join("legacy-source-publish");
+        assert_eq!(
+            build_catalog(&source, &seed, &legacy),
+            Err("invalid catalog source metadata".into())
+        );
+        assert!(!legacy.exists());
 
         let failed = temp.path().join("failed-publish");
         std::fs::write(&source, b"{}").expect("replace with invalid source");

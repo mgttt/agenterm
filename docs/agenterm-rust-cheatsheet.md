@@ -2810,6 +2810,14 @@ only evidence that was actually established. Keep file paths and timestamps out
 of the wire object so identical `.wasm` plus `.tareplay` bytes produce
 identical CI output.
 
+If replay is a publication gate, make it an explicit required source artifact
+and call the same byte-level checker used by the CLI. Require at least one frame
+before calling a trace representative. Run it before signing and before output
+promotion; keep the trace as review evidence rather than silently expanding the
+runtime download surface. Test missing, hash-mismatched and digest-drifted
+traces against the publisher's staging cleanup, not only against the replay
+command.
+
 Boundary benchmarks must measure the direction and ownership operation they
 claim. Host-to-guest calls plus an external memory view do not measure a guest-
 to-host import. Use one validated Wasm fixture with explicit wrapper exports,

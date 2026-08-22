@@ -83,6 +83,11 @@ per-frame output drift. Creator sites and CI should retain both the fixed
 lifecycle report and one or more meaningful gameplay replay reports; neither
 claim substitutes for the other.
 
+The offline official-catalog publisher requires one passing non-empty replay
+per source game and invokes this same byte-level checker before signing. The
+trace remains review/CI evidence and is not added to the app's runtime download
+surface.
+
 For proposal diagnostics, `tinyvm module validate FILE.wasm` also prints the
 post-MVP families actually used by the accepted bytes as
 `standard_features=`. This is usage metadata, not a request to lower missing

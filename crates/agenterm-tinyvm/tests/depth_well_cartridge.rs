@@ -8,6 +8,8 @@ use agenterm_tinyvm::{
     CartridgeOrigin, GameInput, GameLimits, GameRuntime, Grid3dFrame, Limits, ToneBatch, WasmError,
 };
 
+#[cfg(feature = "catalog-publisher")]
+use agenterm_tinyvm::HostProfileV1;
 #[cfg(feature = "cartridge-trust")]
 use agenterm_tinyvm::{CartridgeCache, CartridgeTrustStore, CatalogEntry, cartridge_sha256};
 #[cfg(feature = "replay")]
@@ -439,6 +441,34 @@ fn replay_cli_records_checks_reproduces_and_never_overwrites() {
     assert_eq!(missing_trace_wire["trace"], serde_json::Value::Null);
     assert_eq!(missing_trace_wire["error"]["stage"], "replay_input");
 
+    let zero_path = directory.path().join("zero-frame.tareplay");
+    let wasm_bytes = std::fs::read(&wasm_path).expect("read zero-frame replay cartridge");
+    let mut zero_runtime = runtime(&wasm_bytes);
+    let zero_recorder = must_ok(
+        ReplayRecorderV1::start(&wasm_bytes, &mut zero_runtime),
+        "start zero-frame replay",
+    );
+    std::fs::write(
+        &zero_path,
+        must_ok(zero_recorder.finish(), "finish zero-frame replay"),
+    )
+    .expect("write zero-frame replay");
+    let zero = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["replay", "check"])
+        .arg(&wasm_path)
+        .arg(&zero_path)
+        .arg("--json")
+        .output()
+        .expect("reject zero-frame replay JSON");
+    assert!(!zero.status.success());
+    assert!(zero.stderr.is_empty());
+    let zero_wire: serde_json::Value =
+        serde_json::from_slice(&zero.stdout).expect("decode zero-frame replay report");
+    assert_eq!(zero_wire["replay_valid"], true);
+    assert_eq!(zero_wire["cartridge_bound"], serde_json::Value::Null);
+    assert_eq!(zero_wire["trace"]["steps"], 0);
+    assert_eq!(zero_wire["error"]["stage"], "replay_coverage");
+
     let malformed_path = directory.path().join("malformed.tareplay");
     std::fs::write(&malformed_path, b"not a replay").expect("write malformed replay");
     let malformed = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
@@ -512,6 +542,127 @@ fn replay_cli_records_checks_reproduces_and_never_overwrites() {
         .expect("reject replay overwrite");
     assert!(!overwrite.status.success());
     assert!(String::from_utf8_lossy(&overwrite.stderr).contains("already exists"));
+}
+
+#[cfg(feature = "catalog-publisher")]
+#[test]
+fn catalog_publisher_requires_exact_nonempty_representative_replay() {
+    let directory = tempfile::tempdir().expect("temporary catalog replay fixture");
+    let wasm = build_cartridge();
+    let wasm_path = directory.path().join("depth-well.wasm");
+    let replay_path = directory.path().join("depth-well.tareplay");
+    let profile_path = directory.path().join("ios-build.tahost");
+    let seed_path = directory.path().join("catalog.seed");
+    let source_path = directory.path().join("source.json");
+    std::fs::write(&wasm_path, &wasm).expect("write publisher cartridge");
+
+    let mut replayed = runtime(&wasm);
+    let mut recorder = must_ok(
+        ReplayRecorderV1::start(&wasm, &mut replayed),
+        "start publisher replay",
+    );
+    for input in [
+        GameInput {
+            buttons: 0,
+            clock_ms: 0,
+        },
+        GameInput {
+            buttons: 1,
+            clock_ms: 16,
+        },
+        GameInput {
+            buttons: 1 << 7,
+            clock_ms: 32,
+        },
+    ] {
+        must_ok(
+            recorder.record_tick(&mut replayed, input),
+            "record publisher replay",
+        );
+    }
+    let replay = must_ok(recorder.finish(), "finish publisher replay");
+    std::fs::write(&replay_path, &replay).expect("write publisher replay");
+
+    let profile = must_ok(
+        HostProfileV1::new(Limits::default(), GameLimits::default()),
+        "create publisher host profile",
+    );
+    std::fs::write(
+        &profile_path,
+        must_ok(profile.encode(), "encode publisher host profile"),
+    )
+    .expect("write publisher host profile");
+    std::fs::write(&seed_path, [0x5au8; 32]).expect("write publisher seed");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&seed_path, std::fs::Permissions::from_mode(0o600))
+            .expect("restrict publisher seed");
+    }
+    std::fs::write(
+        &source_path,
+        serde_json::to_vec(&serde_json::json!({
+            "schema_version": 2,
+            "catalog_id": "tinyarcade.test",
+            "signing_key_id": "test-2026",
+            "host_profile": "ios-build.tahost",
+            "games": [{
+                "wasm": "depth-well.wasm",
+                "replay": "depth-well.tareplay",
+                "title": "Depth Well",
+                "summary": "A representative replay gate."
+            }]
+        }))
+        .expect("encode publisher source"),
+    )
+    .expect("write publisher source");
+
+    let published = directory.path().join("published");
+    let success = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["catalog", "build"])
+        .arg(&source_path)
+        .arg(&seed_path)
+        .arg(&published)
+        .output()
+        .expect("publish catalog through CLI");
+    assert!(
+        success.status.success(),
+        "publisher failed: {}",
+        String::from_utf8_lossy(&success.stderr)
+    );
+    assert!(published.join("catalog-v1.json").is_file());
+    assert!(
+        !published.join("depth-well.tareplay").exists(),
+        "review evidence must not become a runtime catalog object"
+    );
+
+    let mut drifted = replay;
+    *drifted.last_mut().expect("replay digest byte") ^= 1;
+    std::fs::write(&replay_path, drifted).expect("write drifted publisher replay");
+    let rejected = directory.path().join("rejected");
+    let failure = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["catalog", "build"])
+        .arg(&source_path)
+        .arg(&seed_path)
+        .arg(&rejected)
+        .output()
+        .expect("reject catalog replay drift through CLI");
+    assert!(!failure.status.success());
+    assert!(
+        String::from_utf8_lossy(&failure.stderr).contains("representative replay replay_execution")
+    );
+    assert!(
+        !rejected.exists(),
+        "failed replay gate must not publish a directory"
+    );
+    assert!(
+        std::fs::read_dir(directory.path())
+            .expect("enumerate publisher fixture")
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .all(|name| !name.starts_with(".rejected.tinyarcade-stage-")),
+        "failed replay gate must remove its private staging directory"
+    );
 }
 
 #[test]

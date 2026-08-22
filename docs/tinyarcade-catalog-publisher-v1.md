@@ -5,12 +5,13 @@ into one complete directory suitable for an HTTPS origin. It does not deploy,
 upload, or modify a live site.
 
 ```text
-author source + standard .wasm + offline Ed25519 seed
+author source + standard .wasm + representative .tareplay + offline Ed25519 seed
     → strict metadata bounds
     → decode one canonical app-build TAH1 profile
     → static profile check for every cartridge
     → manifest/import/module validation
-    → init/tick/media/suspend/resume deterministic replay
+    → fixed init/tick/media/suspend/resume conformance
+    → author-selected TAR1 gameplay replay, every frame exact
     → length + SHA-256 + canonical signed entry
     → public-key verification of the newly signed bytes
     → private staging directory
@@ -35,21 +36,23 @@ printed. It is a TinyArcade catalog key, not an Apple APNs `.p8` key. Keep it
 outside the repository and offline. The matching public key and key id are
 separately bundled in reviewed app releases so keys can rotate or be revoked.
 
-The source is strict JSON; unknown fields fail. WASM and host-profile paths are
-resolved relative to the source file. Identity and compatibility fields are
-intentionally absent:
+Operator source schema 2 is strict JSON; unknown fields fail. WASM, replay and host-profile
+paths are resolved relative to the source file. Every game must name a
+non-empty TAR1 replay. Identity and compatibility fields are intentionally
+absent:
 they are derived from each cartridge's canonical embedded manifest so a site
 operator cannot relabel executable bytes.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "catalog_id": "com.partnernet.tinyarcade",
   "signing_key_id": "catalog-2026-01",
   "host_profile": "ios-build.tahost",
   "games": [
     {
       "wasm": "cartridges/depth-well.wasm",
+      "replay": "replays/depth-well-opening.tareplay",
       "title": "Depth Well",
       "summary": "Drop polycubes into a deep well.",
       "localizations": {
@@ -69,6 +72,14 @@ output is never overwritten. Any validation, signing, verification, encoding,
 or write failure removes the private staging directory and leaves no visible
 publication directory.
 
+Before signing, the publisher runs both dynamic gates used by creator tooling.
+The fixed lifecycle gate catches startup, media and snapshot-contract failures;
+the required TAR1 gate binds the complete cartridge hash and manifest identity,
+requires at least one recorded frame, restores the initial snapshot and checks
+every author-selected render/audio length and digest. A missing, malformed,
+zero-frame, mismatched or drifting replay aborts publication. The replay is
+review evidence and is not copied into the runtime catalog directory.
+
 The source profile must decode as canonical TAH1. Before any game is signed,
 the publisher checks its standard module, declared memory/table and exact
 function imports against that profile without executing it. Publication copies
@@ -82,6 +93,11 @@ the exact same-origin object under byte limits and pass its signed entry plus
 bytes through the live trust/revocation store and verified cache before opening
 the runtime. Private user imports do not use this official-review signature;
 they remain a separate core-only library route.
+
+Source schema 2 is an operator contract and is independent of the emitted
+`catalog-v1.json`, whose runtime discovery schema remains version 1. Source
+schema 1 did not declare representative replay evidence and is rejected rather
+than being silently reinterpreted under the stronger gate.
 
 Native extensions remain ordinary standard WASM function imports. A fan-made
 converter can target `tinyarcade:core/v1` and later documented
