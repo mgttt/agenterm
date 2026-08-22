@@ -399,6 +399,11 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
     private let pixelRange: Range<Int>
     private let applicationMetadataRange: Range<Int>?
 
+    /// Exact output size required by `writeRGBA8888(into:)`. Hosts that draw
+    /// every frame can allocate this storage once and reuse it while the frame
+    /// dimensions remain unchanged.
+    public var rgba8888ByteCount: Int { pixelRange.count * 4 }
+
     fileprivate init(data: Data) throws {
         guard data.count >= 16,
               data.count <= 64 * 1_024,
@@ -490,18 +495,72 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
     public func rgba8888() -> Data {
         withPixelBytes { pixels in
             var rgba = Data(count: pixels.count * 4)
-            rgba.withUnsafeMutableBytes { (output: UnsafeMutableRawBufferPointer) in
-                for (pixelOffset, index) in pixels.enumerated() {
-                    let color = paletteRGBA[Int(index)]
-                    let outputOffset = pixelOffset * 4
-                    output[outputOffset] = UInt8(truncatingIfNeeded: color)
-                    output[outputOffset + 1] = UInt8(truncatingIfNeeded: color >> 8)
-                    output[outputOffset + 2] = UInt8(truncatingIfNeeded: color >> 16)
-                    output[outputOffset + 3] = UInt8(truncatingIfNeeded: color >> 24)
-                }
+            rgba.withUnsafeMutableBytes { output in
+                expandRGBA8888(pixels: pixels, into: output)
             }
             return rgba
         }
+    }
+
+    /// Expands into caller-owned storage without allocating. The destination
+    /// may be larger than the frame but must contain at least
+    /// `rgba8888ByteCount` bytes; bytes after that prefix are left untouched.
+    public func writeRGBA8888(
+        into output: UnsafeMutableRawBufferPointer
+    ) throws {
+        guard output.count >= rgba8888ByteCount else {
+            throw TinyArcadePresentationError.bufferTooSmall(required: rgba8888ByteCount)
+        }
+        expandRGBA8888(into: output)
+    }
+
+    func writePremultipliedRGBA8888(
+        into output: UnsafeMutableRawBufferPointer
+    ) throws {
+        guard output.count >= rgba8888ByteCount else {
+            throw TinyArcadePresentationError.bufferTooSmall(required: rgba8888ByteCount)
+        }
+        withPixelBytes { pixels in
+            for (pixelOffset, index) in pixels.enumerated() {
+                let color = paletteRGBA[Int(index)]
+                let alpha = UInt16(UInt8(truncatingIfNeeded: color >> 24))
+                let outputOffset = pixelOffset * 4
+                output[outputOffset] = Self.premultiply(
+                    UInt8(truncatingIfNeeded: color), alpha: alpha
+                )
+                output[outputOffset + 1] = Self.premultiply(
+                    UInt8(truncatingIfNeeded: color >> 8), alpha: alpha
+                )
+                output[outputOffset + 2] = Self.premultiply(
+                    UInt8(truncatingIfNeeded: color >> 16), alpha: alpha
+                )
+                output[outputOffset + 3] = UInt8(alpha)
+            }
+        }
+    }
+
+    private func expandRGBA8888(into output: UnsafeMutableRawBufferPointer) {
+        withPixelBytes { pixels in
+            expandRGBA8888(pixels: pixels, into: output)
+        }
+    }
+
+    private func expandRGBA8888(
+        pixels: UnsafeRawBufferPointer,
+        into output: UnsafeMutableRawBufferPointer
+    ) {
+        for (pixelOffset, index) in pixels.enumerated() {
+            let color = paletteRGBA[Int(index)]
+            let outputOffset = pixelOffset * 4
+            output[outputOffset] = UInt8(truncatingIfNeeded: color)
+            output[outputOffset + 1] = UInt8(truncatingIfNeeded: color >> 8)
+            output[outputOffset + 2] = UInt8(truncatingIfNeeded: color >> 16)
+            output[outputOffset + 3] = UInt8(truncatingIfNeeded: color >> 24)
+        }
+    }
+
+    private static func premultiply(_ component: UInt8, alpha: UInt16) -> UInt8 {
+        UInt8((UInt16(component) * alpha + 127) / 255)
     }
 
     /// Builds an sRGB, non-premultiplied RGBA image suitable for Core Graphics
@@ -536,12 +595,20 @@ public struct TinyArcadeIndexed2DFrame: Sendable {
 
 public enum TinyArcadePresentationError: Error, Equatable {
     case imageAllocation
+    case bufferTooSmall(required: Int)
 }
 
 /// Minimal native presentation surface for indexed cartridges. The host owns
 /// its layout; this view preserves aspect ratio and nearest-neighbour pixels.
 @MainActor
 public final class TinyArcadeIndexed2DView: UIView {
+    private var bitmapStorage: NSMutableData?
+    private var bitmapContext: CGContext?
+    private var bitmapDimensions: (width: Int, height: Int)?
+    #if TINYARCADE_TEST_HOOKS
+    private(set) var bitmapStorageGeneration: UInt64 = 0
+    #endif
+
     public override init(frame: CGRect) {
         super.init(frame: frame)
         configure()
@@ -553,7 +620,24 @@ public final class TinyArcadeIndexed2DView: UIView {
     }
 
     public func display(_ frame: TinyArcadeIndexed2DFrame) throws {
-        layer.contents = try frame.makeCGImage()
+        let width = Int(frame.width)
+        let height = Int(frame.height)
+        if bitmapDimensions?.width != width || bitmapDimensions?.height != height {
+            try allocateBitmap(width: width, height: height)
+        }
+        guard let bitmapStorage, let bitmapContext else {
+            throw TinyArcadePresentationError.imageAllocation
+        }
+        try frame.writePremultipliedRGBA8888(
+            into: UnsafeMutableRawBufferPointer(
+                start: bitmapStorage.mutableBytes,
+                count: bitmapStorage.length
+            )
+        )
+        guard let image = bitmapContext.makeImage() else {
+            throw TinyArcadePresentationError.imageAllocation
+        }
+        layer.contents = image
     }
 
     public func clear() {
@@ -566,6 +650,34 @@ public final class TinyArcadeIndexed2DView: UIView {
         layer.contentsGravity = .resizeAspect
         layer.magnificationFilter = .nearest
         layer.minificationFilter = .nearest
+    }
+
+    private func allocateBitmap(width: Int, height: Int) throws {
+        let byteCount = width * height * 4
+        guard let storage = NSMutableData(length: byteCount),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+            throw TinyArcadePresentationError.imageAllocation
+        }
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.union(
+            CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        )
+        guard let context = CGContext(
+            data: storage.mutableBytes,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        ) else {
+            throw TinyArcadePresentationError.imageAllocation
+        }
+        bitmapStorage = storage
+        bitmapContext = context
+        bitmapDimensions = (width, height)
+        #if TINYARCADE_TEST_HOOKS
+        bitmapStorageGeneration = bitmapStorageGeneration &+ 1
+        #endif
     }
 }
 

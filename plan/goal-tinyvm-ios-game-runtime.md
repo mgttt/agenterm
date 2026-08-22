@@ -4657,3 +4657,34 @@ consuming the exact current archive (SHA-256
 `582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`).
 Physical-iPhone lifecycle/performance/audio and TestFlight install/play evidence
 remain open, so the persistent goal stays active.
+
+## One-hundred-fiftieth executable increment — recyclable indexed2d presentation
+
+The Swift SDK now exposes the exact RGBA byte count and a checked
+`writeRGBA8888(into:)` path, so a native renderer can expand validated palette
+indices into caller-owned storage without a per-frame `Data` allocation. A
+short destination fails before writing. The original `rgba8888()` and
+`makeCGImage()` conveniences remain source-compatible and preserve their
+canonical straight-alpha RGBA contract.
+
+`TinyArcadeIndexed2DView` now retains one bounded pixel buffer and one Core
+Graphics bitmap context per frame size. Consecutive same-sized frames reuse
+both; only a dimension change replaces them. UIKit's internal bitmap uses
+rounded premultiplied RGBA, while the public bytes remain non-premultiplied, so
+the optimization does not silently change the SDK data contract. The booted
+iOS Simulator black box proves exact opaque/translucent bytes, explicit short
+buffer rejection, a changed second frame, one storage generation across 120
+320 × 200 displays and a 0.121 ms average presentation time. Default linked
+sizes are 1,798,264 bytes arm64 and 1,908,000 bytes x86_64; only the
+default simulator ceiling receives one explicit 16 KiB step, while the default
+arm64 product ceiling remains unchanged. The opt-in SIMD pair links at
+1,817,032 / 1,920,584 bytes and receives the same explicit one-bucket pairing
+step on each architecture. Physical-iPhone lifecycle/performance/audio and
+TestFlight install/play evidence remain open. The real Nostalgia Arcade target
+consumes this Swift source with the byte-identical current ABI v1.13 archive
+(SHA-256
+`582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`),
+passes 13 cartridge unit tests and the two-game UI journey (including the live
+Signal Lock indexed2d view), then produces an arm64 device Release build. The
+persistent goal therefore stays active only for the still-external evidence,
+not for lack of an integrated App consumer.

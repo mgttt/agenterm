@@ -301,11 +301,21 @@ read-only views into that owner for native decoding and RGBA conversion; their
 pointers cannot escape the closure. The zero-indexed `pixels` and
 `applicationMetadata` properties remain source-compatible value snapshots and
 copy only when a caller explicitly asks for them.
-Indexed presentation expands the validated palette plane directly into one
-final-size `Data` buffer. It no longer grows a separate `[UInt8]` and then
-copies the complete RGBA frame into `Data`; the existing 320 × 200 Simulator
-presentation loop exercises the resulting CGImage path under its 16 ms average
-budget, including non-opaque palette alpha.
+Indexed presentation exposes the exact `rgba8888ByteCount` and can expand the
+validated palette plane directly into caller-owned storage through
+`writeRGBA8888(into:)`; a short destination fails explicitly before any byte is
+written. The source-compatible `rgba8888()` convenience still creates one
+final-size `Data` and never grows a separate `[UInt8]` first.
+
+`TinyArcadeIndexed2DView` retains one `NSMutableData` plus one bitmap context
+for the current dimensions. Same-sized frames overwrite that bounded storage
+and create only the presentation image; a dimension change replaces the buffer
+and context. The public byte contract remains straight, non-premultiplied RGBA.
+The UIKit-only path performs exact rounded alpha premultiplication while filling
+its context because Core Graphics bitmap contexts require a supported
+premultiplied-alpha layout. The 320 × 200 booted-Simulator loop proves one
+buffer/context generation across 120 displays and remains under its 16 ms
+average budget, including a non-opaque palette entry.
 
 Replay recording is state on the same owner-thread runtime handle. Begin
 captures a portable snapshot and clears the previous completed trace; ordinary
@@ -320,11 +330,13 @@ runtime as the preservation-safe verification owner.
 `TinyArcadeIndexed2DFrame.rgba8888()` expands only already-validated indices
 into canonical row-major RGBA bytes, with a decoder-proven allocation ceiling
 below 256 KiB. `makeCGImage()` retains those bytes in an sRGB,
-non-premultiplied, non-interpolated image. `TinyArcadeIndexed2DView` is the
-minimal UIKit presentation owner: it preserves aspect ratio, applies nearest
-filters for magnification and minification, and lets the app choose layout and
-compositing. A Metal host remains free to use the palette and index plane
-directly; UIKit and Core Graphics never enter the guest ABI.
+non-premultiplied, non-interpolated image. Hot hosts can instead reuse their own
+buffer with `writeRGBA8888(into:)`. `TinyArcadeIndexed2DView` is the minimal
+UIKit presentation owner: it reuses its dimension-bound premultiplied bitmap,
+preserves aspect ratio, applies nearest filters for magnification and
+minification, and lets the app choose layout and compositing. A Metal host
+remains free to use the palette and index plane directly; UIKit and Core
+Graphics never enter the guest ABI.
 
 `TinyArcadeToneSynthesizer.waveData(for:)` converts a validated tone batch into
 a bounded 22,050 Hz mono PCM WAV using the event order, pitch, duration and

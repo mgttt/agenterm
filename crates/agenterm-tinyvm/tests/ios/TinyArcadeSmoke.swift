@@ -781,7 +781,7 @@ struct TinyArcadeSmoke {
                     maxCallsPerLifecycle: 2
                 ) { parameters, memory in
                     precondition(parameters == [40, 2])
-                    let indexedFrame = Self.indexedFrame(lastPixel: 1)
+                    let indexedFrame = Self.indexedFrame(lastPixel: nativeCalls < 2 ? 1 : 0)
                     precondition(memory.count >= indexedFrame.count)
                     for (index, value) in indexedFrame.enumerated() { memory[index] = value }
                     nativeCalls += 1
@@ -807,6 +807,26 @@ struct TinyArcadeSmoke {
         }
         let expectedRGBA = Data([255, 0, 0, 255, 0, 255, 0, 128])
         precondition(indexedFrame.rgba8888() == expectedRGBA)
+        precondition(indexedFrame.rgba8888ByteCount == expectedRGBA.count)
+        var reusableRGBA = Data(count: indexedFrame.rgba8888ByteCount)
+        try reusableRGBA.withUnsafeMutableBytes { output in
+            try indexedFrame.writeRGBA8888(into: output)
+        }
+        precondition(reusableRGBA == expectedRGBA)
+        var premultipliedRGBA = Data(count: indexedFrame.rgba8888ByteCount)
+        try premultipliedRGBA.withUnsafeMutableBytes { output in
+            try indexedFrame.writePremultipliedRGBA8888(into: output)
+        }
+        precondition(premultipliedRGBA == Data([255, 0, 0, 255, 0, 128, 0, 128]))
+        var shortRGBA = Data(count: indexedFrame.rgba8888ByteCount - 1)
+        do {
+            try shortRGBA.withUnsafeMutableBytes { output in
+                try indexedFrame.writeRGBA8888(into: output)
+            }
+            preconditionFailure("short RGBA destination must fail")
+        } catch let error as TinyArcadePresentationError {
+            precondition(error == .bufferTooSmall(required: expectedRGBA.count))
+        }
         let image = try indexedFrame.makeCGImage()
         precondition(image.width == 2 && image.height == 1)
         precondition(image.bitsPerPixel == 32 && image.bytesPerRow == 8)
@@ -820,6 +840,26 @@ struct TinyArcadeSmoke {
         precondition(providerData as Data == expectedRGBA)
         let view = TinyArcadeIndexed2DView(frame: CGRect(x: 0, y: 0, width: 320, height: 240))
         try view.display(indexedFrame)
+        precondition(view.bitmapStorageGeneration == 1)
+        try view.display(indexedFrame)
+        precondition(
+            view.bitmapStorageGeneration == 1,
+            "same-sized indexed frames must reuse the presentation buffer"
+        )
+        let changedMedia = try nativeRuntime.tickMedia(buttons: 0, clockMilliseconds: 1)
+        guard case let .indexed2D(changedFrame) = changedMedia.renderFrame else {
+            preconditionFailure("changed native frame should remain indexed2d")
+        }
+        var changedRGBA = Data(count: changedFrame.rgba8888ByteCount)
+        try changedRGBA.withUnsafeMutableBytes { output in
+            try changedFrame.writePremultipliedRGBA8888(into: output)
+        }
+        precondition(changedRGBA == Data([255, 0, 0, 255, 255, 0, 0, 255]))
+        try view.display(changedFrame)
+        precondition(
+            view.bitmapStorageGeneration == 1,
+            "changed same-sized frames must reuse the presentation buffer"
+        )
         precondition(view.layer.contents != nil)
         precondition(view.layer.contentsGravity == .resizeAspect)
         precondition(view.layer.magnificationFilter == .nearest)
@@ -882,6 +922,10 @@ struct TinyArcadeSmoke {
         let renderIterations = 120
         let renderStart = ProcessInfo.processInfo.systemUptime
         for _ in 0..<renderIterations { try classicView.display(classicFrame) }
+        precondition(
+            classicView.bitmapStorageGeneration == 1,
+            "the classic presentation loop must allocate its bitmap storage once"
+        )
         let renderAverageMilliseconds = (
             ProcessInfo.processInfo.systemUptime - renderStart
         ) * 1_000 / Double(renderIterations)

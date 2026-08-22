@@ -56,8 +56,11 @@ does not. Measure device wall time and process memory separately.
 
 For indexed cartridges, `TinyArcadeIndexed2DFrame.makeCGImage()` provides an
 exact sRGB RGBA image and `TinyArcadeIndexed2DView` is a ready-to-layout UIKit
-surface with aspect-fit, nearest-neighbour presentation. Apps that own a Metal
-renderer can instead consume the validated palette and pixel plane directly.
+surface with aspect-fit, nearest-neighbour presentation. The view reuses its
+dimension-bound pixel storage and bitmap context across frames. Custom native
+renderers can reuse their own storage through `rgba8888ByteCount` and the
+checked `writeRGBA8888(into:)`, or consume the validated palette and pixel
+plane directly for Metal.
 
 For audio feedback, pass `TinyArcadeMediaFrame.tones` to
 `TinyArcadeTonePlayer.play(_:)`. The default player uses a mixing `.ambient`
