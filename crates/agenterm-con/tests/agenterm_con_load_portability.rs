@@ -30,10 +30,23 @@ use std::path::PathBuf;
 /// Kept as data rather than a single assertion so the failure message can say
 /// *which* symbol and *which* Windows it locks the product out of. Add an
 /// entry whenever a newer API becomes reachable statically.
+/// Its weakness is that it is hand-written: it can only refuse what someone
+/// already knew to list. Both entries below were added *after* a user's
+/// machine found them, in two separate rounds. `tools/probe-imports.ps1`
+/// exists so the next round is a full answer from the target system instead
+/// of another guess from this one.
 const LOAD_TIME_BLOCKERS: &[(&str, &str)] = &[
     ("CreatePseudoConsole", "Windows 10 build 17763 (1809)"),
     ("ResizePseudoConsole", "Windows 10 build 17763 (1809)"),
     ("ClosePseudoConsole", "Windows 10 build 17763 (1809)"),
+    // Documented as 1607 — which *is* Server 2016 — and still absent there:
+    // 1607 implements it only in KernelBase.dll and the kernel32 forwarder
+    // arrived in 1703. Documented minimum versions are therefore evidence,
+    // not proof; only the target system settles it.
+    (
+        "SetThreadDescription",
+        "the kernel32 forwarder, Windows 10 build 15063 (1703)",
+    ),
 ];
 
 /// Modules the operating system itself provides on the oldest Windows this

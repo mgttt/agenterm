@@ -856,7 +856,23 @@ con 已是独立 package、有独立 CI 与独立对齐门，不再是"主程序
   152 条 con 测试全绿;三平台 `cargo check` 绿;体积 +2,048 B(717,824 / 1,048,575)。
   新增 `tests/agenterm_con_load_portability.rs` 直接解析产物导入表钉住这一类:
   该门做过反向对照(把一个确实被导入的符号加进禁列 → 立即变红),不是空断言。
+  第二轮(2026-08-22,用户在目标机实测反馈):ConPTY 修好后加载器报出下一个——
+  `SetThreadDescription`。微软文档写"最低 Windows 10 1607",而 1607 **就是** Server 2016;
+  文档没写的是 1607 只在 `KernelBase.dll` 里实现它,`kernel32` 转发项到 1703(15063)才加。
+  已修:`adapters/windows/threading.rs::thread_naming` 运行期解析(kernel32 → KernelBase 兜底),
+  解析不到就不给线程命名——命名纯粹是调试器可读性,无行为影响,调用方没有需要处理的东西。
+  既有的 `detached_task_runs_with_the_requested_os_name` 就是功能证据(走的是新路径)。
+
+  **教训与对策**:这一轮暴露了门的设计弱点——禁列是手写的,只挡得住已经想到的符号;
+  而"文档标称的最低版本"被证明是证据而非证明。逐个符号往返的成本由用户承担,不可接受。
+  新增 `scripts/probe-imports.ps1`:在目标机上自行解析 PE 导入表并逐个 `GetProcAddress`,
+  一次给出**完整**缺失集。它做过两项自检——解析结果与 dumpbin 逐符号对齐(189 = 189,
+  差的 7 个是 dumpbin 摘要区的节名,不是漏解析);脚本内置探针自检(不存在的导出必须解析失败、
+  通用导出必须解析成功),否则"全部通过"就可能是探针坏了而不是系统没问题。
+
   **仍未关**:
+  - 未在真实 Server 2016 上跑过 `probe-imports.ps1`;第三个阻断符号存在与否未知。
+    本机(Server 2022 / 10.0.20348)对当前产物报全通过,这只排除了本机。
   - `VCRUNTIME140.dll` 仍是动态依赖(`mem*` 四个 + `__CxxFrameHandler3` / `_CxxThrowException`),
     干净的 Server 2016 不自带,需装 VC++ 运行库。已在门里记为 `KNOWN_NON_OS_MODULES`,
     保证它可见、且不能被用来放行新的非 OS 依赖。
