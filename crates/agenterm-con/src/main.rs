@@ -211,6 +211,11 @@ mod pty_budget_tests {
 /// pixels, not points, and therefore rendered smaller than intended.
 const DEFAULT_FONT_PX: f64 = 15.0;
 
+/// Composer text geometry, shared by the painter and the IME candidate
+/// placement so the caret they each compute cannot land in two places.
+const COMPOSER_TEXT_SIZE_PX: u16 = 15;
+const COMPOSER_TEXT_INSET: u32 = 10;
+
 #[allow(clippy::manual_clamp)] // f64::clamp retains the large float-format panic path.
 fn clamp_font_size(value: f64) -> f64 {
     if value < 8.0 {
@@ -1498,9 +1503,33 @@ impl ConApp {
             metrics.physical_height,
             metrics.scale_factor,
         );
-        let x = layout.composer_input.x as f64 / scale
-            + 10.0
-            + self.composer.text.chars().count() as f64 * 8.0;
+        // The composer paints a sliding window onto its line, so the caret is
+        // at the end of what is *visible*, not at the end of the buffer.
+        // Measuring the whole buffer sent the IME candidate list off screen as
+        // soon as the text outgrew the box, and did it with a hard-coded 8 px
+        // advance that no font honours.
+        let cell_width = font::cell_metrics(COMPOSER_TEXT_SIZE_PX).width.max(1);
+        let text_width = layout
+            .composer_input
+            .width
+            .saturating_sub(COMPOSER_TEXT_INSET.saturating_mul(2));
+        let visible = composer::visible_window(
+            &self.composer.text,
+            &self.composer.preedit,
+            1,
+            (text_width / cell_width) as usize,
+        );
+        let caret_cells = usize::from(visible.truncated)
+            + composer::cells(&self.composer.text[visible.text..])
+            + composer::cells(&self.composer.preedit[visible.preedit..]);
+        let caret_offset = cell_width.saturating_mul(caret_cells as u32).min(text_width);
+        let x = f64::from(
+            layout
+                .composer_input
+                .x
+                .saturating_add(COMPOSER_TEXT_INSET)
+                .saturating_add(caret_offset),
+        ) / scale;
         let y = layout.composer_input.y as f64 / scale + 8.0;
         let _ = window.set_ime_cursor_area(agenterm_platform::window_host::LogicalRect::new(
             x, y, 2.0, 20.0,
@@ -2716,18 +2745,37 @@ impl ConApp {
         } else {
             ""
         };
+        // Slide the painted window to the end of the line. `paint_chrome_text_parts`
+        // clips whatever exceeds its box, and it clips the tail -- so without
+        // this the composer keeps showing the text you typed first while the
+        // characters you are typing now, and the caret after them, fall
+        // outside the box entirely.
+        let composer_text_width = layout
+            .composer_input
+            .width
+            .saturating_sub(COMPOSER_TEXT_INSET.saturating_mul(2));
+        let composer_cells = (composer_text_width
+            / font::cell_metrics(COMPOSER_TEXT_SIZE_PX).width.max(1))
+            as usize;
+        let window = composer::visible_window(
+            &self.composer.text,
+            &self.composer.preedit,
+            composer_cursor.len(),
+            composer_cells,
+        );
         paint_chrome_text_parts(
             &mut surface,
-            layout.composer_input.x + 10,
+            layout.composer_input.x + COMPOSER_TEXT_INSET,
             layout.composer_input.y + 12,
             &[
-                self.composer.text.as_str(),
-                self.composer.preedit.as_str(),
+                if window.truncated { "…" } else { "" },
+                &self.composer.text[window.text..],
+                &self.composer.preedit[window.preedit..],
                 composer_cursor,
             ],
             text,
-            15,
-            layout.composer_input.width.saturating_sub(20),
+            COMPOSER_TEXT_SIZE_PX,
+            composer_text_width,
         );
         paint_chrome_text(
             &mut surface,
