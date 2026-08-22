@@ -7,6 +7,8 @@
 能否：能但只长宿主调度与插件；`eval(bytes)` 仍只吃 wasm，完整 JS 不运行时 AOT。
 qjs-wasm 独立：独立于 tinyvm 且不并进现成 `agenterm-qjs`；同 workspace 新 crate/插件件即可，不必另起 git 第三仓。
 
+政委 2026-08-22 08:23 定名：新 crate `agenterm-tinyvm-qjs`。独立 crate，不进 `crates/agenterm-tinyvm`，不并 `agenterm-qjs`。脸 `eval_qjs`，里面走 tinyvm `eval(bytes)`。不是当前写刀。
+
 ```
 路径
 ├── 不是当前写刀 [x]
@@ -90,11 +92,11 @@ qjs-wasm 独立：独立于 tinyvm 且不并进现成 `agenterm-qjs`；同 works
 │   │   └── 并进会把信任模型、ABI、禁 AOT 声明三条拧成一条，且仍要外挂 wasm 产物
 │   └── 第三件 = 插件件 / 新 crate，不是第四脚本引擎（不进 rh/lua/qjs 矩阵）
 │       ├── 边界：tinyvm 只提供 eval+校验+Limits+门；qjs-wasm 提供引擎 `.wasm` 与 pack
-│       └── 仓位：同 workspace 新 crate（或 guests 外的插件包）即可；现在不必另起 git
+│       └── 仓位：同 workspace 新 crate `agenterm-tinyvm-qjs`（或 guests 外的插件包）；现在不必另起 git
 │
 └── 问 5 · 一页收口
     ├── 能长在现成 tinyvm 上，条件是不拆脸、不 JIT、JS 当引擎插件
-    ├── qjs-wasm 独立于 tinyvm 与本机 qjs crate；不是当前写刀
+    ├── qjs-wasm 独立 crate 名为 `agenterm-tinyvm-qjs`；脸 `eval_qjs`；不是当前写刀
     └── 下一刀若有：仍是插件宿主脸 / 诊断 / 门收口，不是本页开编 qjs
 ```
 
