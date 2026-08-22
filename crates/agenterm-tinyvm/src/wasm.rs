@@ -1,11 +1,18 @@
 //! Slot A: a thin interpreter for **WebAssembly 1.0 MVP** (all 172 opcodes).
 //!
-//! The public face is [`eval`]: standard `.wasm` bytes in, a [`Val`] sequence
-//! or a loud [`WasmError`] out. WAT is not an input. Host functions enter
-//! through the module import table ([`Module::bind_import_typed_in_place`]),
-//! not a general FFI. [`Module::bind_import`] remains the narrower i32
-//! compatibility door used by simple embeddings. No JIT/AOT — that is parked
-//! slot B.
+//! The public face is [`eval_wasm`]: standard `.wasm` bytes in (`\0asm`),
+//! optional host-door [`HostGlobal`] bindings, this-call [`Val`] locals, and a
+//! [`Val`] sequence or a loud [`WasmError`] out. WAT is not an input. Host
+//! functions enter through the module import table
+//! ([`Module::bind_import_typed_in_place`]), not a general FFI.
+//! [`Module::bind_import`] remains the narrower i32 compatibility door used by
+//! simple embeddings. No JIT/AOT — that is parked slot B.
+//! [`eval`] / [`eval_with`] remain callable aliases of the empty-gate form.
+//!
+//! Concept (Cloudflare Workers, design only — not V8/workerd/isolate): one
+//! untrusted wasm guest per slot, guests do not see each other, language sugar
+//! sits above this face, `globals`/`locals` are the host door (not POSIX),
+//! [`Limits`] live in the core, and container/OS wrapping is a later host.
 //!
 //! Every fault is loud: a malformed body fails to decode, and a run-time trap
 //! (stack underflow, out-of-range local/label/func, unbound import, budget
@@ -1244,20 +1251,101 @@ impl Default for Limits {
     }
 }
 
-/// Slot A face: load a standard WebAssembly 1.0 module and evaluate it.
+/// One named value offered at the host door for [`eval_wasm`].
 ///
-/// Runs the start function if present, then the first declared function
-/// export (or the first defined function if there is no export). Host
-/// imports stay unbound and trap if called; bind them via
-/// [`Module::from_bytes`] + [`Module::bind_import`] + [`Module::eval`].
-/// Uses [`Limits::default`] as the host budget.
-pub fn eval(bytes: &[u8]) -> Result<Vec<Val>, WasmError> {
-    eval_with(bytes, Limits::default())
+/// `(module, field)` matches the guest import table: a function import
+/// becomes a constant-returning host callback, and a matching imported global
+/// is bound with the same [`Val`]. This is the existing import table, not a
+/// second FFI.
+#[derive(Clone, Copy)]
+pub struct HostGlobal<'a> {
+    pub module: &'a str,
+    pub field: &'a str,
+    pub value: Val,
 }
 
-/// Like [`eval`], but the caller supplies the host budget.
+impl<'a> HostGlobal<'a> {
+    /// Bind `module.field` to a constant [`Val`] at the host door.
+    pub const fn new(module: &'a str, field: &'a str, value: Val) -> Self {
+        Self {
+            module,
+            field,
+            value,
+        }
+    }
+}
+
+fn apply_eval_globals(module: &mut Module, globals: &[HostGlobal<'_>]) -> Result<(), WasmError> {
+    for global in globals {
+        if module
+            .imports()
+            .iter()
+            .any(|desc| desc.module == global.module && desc.field == global.field)
+        {
+            let value = global.value;
+            module.bind_import_typed(global.module, global.field, move |_args, _memory| {
+                Ok(alloc::vec![value])
+            })?;
+        }
+        if module
+            .global_imports()
+            .iter()
+            .any(|desc| desc.module == global.module && desc.field == global.field)
+        {
+            let mutable = module
+                .global_imports()
+                .iter()
+                .find(|desc| desc.module == global.module && desc.field == global.field)
+                .map(|desc| desc.mutable)
+                .unwrap_or(false);
+            module.bind_global_import(
+                global.module,
+                global.field,
+                &Global::new(global.value, mutable),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Slot A face: load a standard WebAssembly 1.0 module and evaluate it.
+///
+/// `data` is wasm bytes (`\0asm`). WAT and JS source are not inputs.
+/// `globals` bind the import table at the host door. `locals` are this call's
+/// arguments to the entry function. Runs the start function if present, then
+/// the first declared function export (or the first defined function if there
+/// is no export). Unbound imports trap if called. Uses [`Limits::default`].
+pub fn eval_wasm(
+    data: &[u8],
+    globals: &[HostGlobal<'_>],
+    locals: &[Val],
+) -> Result<Vec<Val>, WasmError> {
+    eval_wasm_with(data, globals, locals, Limits::default())
+}
+
+/// Like [`eval_wasm`], but the caller supplies the host budget.
+pub fn eval_wasm_with(
+    data: &[u8],
+    globals: &[HostGlobal<'_>],
+    locals: &[Val],
+    limits: Limits,
+) -> Result<Vec<Val>, WasmError> {
+    let mut module = Module::from_bytes_with(data, limits)?;
+    if !globals.is_empty() {
+        apply_eval_globals(&mut module, globals)?;
+    }
+    module.eval(locals)
+}
+
+/// Compatibility alias: `eval(bytes)` ≡ [`eval_wasm`]`(bytes, &[], &[])`.
+pub fn eval(bytes: &[u8]) -> Result<Vec<Val>, WasmError> {
+    eval_wasm(bytes, &[], &[])
+}
+
+/// Compatibility alias: `eval_with(bytes, limits)` ≡
+/// [`eval_wasm_with`]`(bytes, &[], &[], limits)`.
 pub fn eval_with(bytes: &[u8], limits: Limits) -> Result<Vec<Val>, WasmError> {
-    Module::from_bytes_with(bytes, limits)?.eval(&[])
+    eval_wasm_with(bytes, &[], &[], limits)
 }
 
 #[cfg_attr(test, derive(Debug))]

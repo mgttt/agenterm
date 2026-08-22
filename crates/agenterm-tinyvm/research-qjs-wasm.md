@@ -103,3 +103,7 @@ qjs-wasm 独立：独立于 tinyvm 且不并进现成 `agenterm-qjs`；同 works
 公开设计锚（不搬仓、不抄源）：Bellard QuickJS = 字节码解释器 + qjsc 嵌字节码；
 quickjs-ng 平台表含 iOS / WASI / Emscripten（解释器交叉编译，非 JS→wasm AOT）；
 quickjs-wasi 一类 = 解释器编成 reactor wasm + 少量 import（WASI + host_call）。
+
+Cloudflare Workers 对照（只借概念，不 clone、不搬 V8/workerd/isolate 实现、不装完整 JS 引擎）：
+一份不可信程序一个隔离槽、槽互不见；JS/qjs 是语言皮；globals/locals 是宿主门不是 POSIX；
+上限（Limits / 核体积）在 tinyvm 核；容器/OS 是后加的宿主包装。eval_qjs = qjs2wasm（表达式糖 → MVP wasm）+ eval_wasm。
