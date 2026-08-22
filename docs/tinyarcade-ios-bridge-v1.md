@@ -62,9 +62,13 @@ opening the exact cached bytes.
 `TinyArcadeSnapshotStoreV1` owns scene/background persistence independently of
 cartridge distribution. It stores one bounded binary envelope per canonical
 game id with the host-owned game clock, CRC-32 and the runtime's already
-ABI/state-schema-bound snapshot. Writes use atomic replacement, the directory
-is excluded from backup and files receive complete-until-first-authentication
-protection. Reads reject symlinks and oversized/non-regular files. A corrupt or
+ABI/state-schema-bound snapshot. A save reserves one exact envelope buffer,
+writes it to a same-directory prepared file, applies
+complete-until-first-authentication protection there, and only then atomically
+moves or replaces the published generation. Failure before publication removes
+the prepared file and leaves the previous snapshot byte-for-byte intact. The
+directory is excluded from backup. Reads reject symlinks and
+oversized/non-regular files. A corrupt or
 incompatible snapshot is removed; the failed candidate runtime is closed and a
 second clean runtime is returned with `discardedInvalid`, so save damage cannot
 turn into a cartridge launch failure.
@@ -384,8 +388,8 @@ arm64/x86_64 iOS-simulator archive, assembles both into one XCFramework,
 compiles the public C header,
 imports the module from Swift, links the Swift ownership wrapper against the
 simulator archive, and verifies the output Mach-O platform is `IOSSIMULATOR`.
-The optimized linked arm64 smoke executable must remain at or below 1.59375 MiB;
-the simulator-only x86_64 compatibility slice has a separate 1.671875 MiB gate.
+The optimized linked arm64 smoke executable has an explicit byte ceiling; the
+simulator-only x86_64 compatibility slice has a separate ceiling.
 This measures the dead-stripped consumer result rather than the multi-object static
 archive's misleading on-disk size. The earlier 1 MiB gate was raised only when
 the exercised Swift consumer added the bounded official-catalog JSON decoder;
@@ -393,8 +397,10 @@ the later 1.375 MiB gate accounted for the recoverable snapshot-store owner;
 the arm64 gate additionally includes the app-owned completion channel,
 process-lifetime ticket domains, safe late-delivery boundary and automatic
 audio interruption/route/reset ownership.
-Current linked evidence is 1,663,848 bytes arm64, 1,751,992 bytes x86_64 and
-1,168,880 bytes for the focused completion consumer.
+The ceiling advances only in named 16 KiB capability steps. The prepared,
+protected snapshot publication transaction receives one such arm64 step; its
+black box also proves that a forced replacement failure preserves the old bytes
+and removes the prepared artifact.
 Replay remains within that existing honest ceiling;
 the interpreter's separate stripped static-core gate remains below 100 KiB.
 

@@ -2943,27 +2943,47 @@ public final class TinyArcadeSnapshotStoreV1 {
         guard !snapshot.isEmpty, snapshot.count <= maximumSnapshotBytes else {
             throw TinyArcadeSnapshotStoreError.invalidLimit
         }
+        let gameIDBytes = Array(gameID.utf8)
+        let envelopeLength = 32 + gameIDBytes.count + snapshot.count
         let url = try fileURL(gameID: gameID)
         try rejectUnsafeExistingFile(url)
-        var data = Data("TAS1".utf8)
+        var data = Data()
+        data.reserveCapacity(envelopeLength)
+        data.append(contentsOf: "TAS1".utf8)
         Self.append(UInt16(1), to: &data)
         Self.append(UInt16(32), to: &data)
         Self.append(gameClockMilliseconds, to: &data)
-        Self.append(UInt16(gameID.utf8.count), to: &data)
+        Self.append(UInt16(gameIDBytes.count), to: &data)
         Self.append(UInt16(0), to: &data)
         Self.append(UInt32(snapshot.count), to: &data)
         Self.append(UInt32(0), to: &data)
         Self.append(UInt64(0), to: &data)
-        data.append(contentsOf: gameID.utf8)
+        data.append(contentsOf: gameIDBytes)
         data.append(snapshot)
+        precondition(data.count == envelopeLength)
         let checksum = Self.checksum(data)
         for offset in 0..<4 { data[20 + offset] = UInt8(truncatingIfNeeded: checksum >> (offset * 8)) }
+        let temporaryURL = directoryURL.appendingPathComponent(
+            ".\(gameID).snapshot-v1.\(UUID().uuidString).prepared",
+            isDirectory: false
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
         do {
-            try data.write(to: url, options: .atomic)
+            try data.write(to: temporaryURL, options: .withoutOverwriting)
             try FileManager.default.setAttributes(
                 [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
-                ofItemAtPath: url.path
+                ofItemAtPath: temporaryURL.path
             )
+            if FileManager.default.fileExists(atPath: url.path) {
+                _ = try FileManager.default.replaceItemAt(
+                    url,
+                    withItemAt: temporaryURL,
+                    backupItemName: nil,
+                    options: .usingNewMetadataOnly
+                )
+            } else {
+                try FileManager.default.moveItem(at: temporaryURL, to: url)
+            }
         } catch {
             throw TinyArcadeSnapshotStoreError.storageFailure
         }
@@ -3010,7 +3030,10 @@ public final class TinyArcadeSnapshotStoreV1 {
                   (1...maximumSnapshotBytes).contains(snapshotLength),
                   data.count == 32 + idLength + snapshotLength,
                   Self.u32(data, 20) == Self.checksum(data),
-                  let storedID = String(data: data.subdata(in: 32..<(32 + idLength)), encoding: .utf8),
+                  let storedID = String(
+                      bytes: data[32..<(32 + idLength)],
+                      encoding: .utf8
+                  ),
                   storedID == gameID else { return .invalid }
             return .valid(
                 clock: clock,

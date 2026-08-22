@@ -43,6 +43,16 @@ if grep -Fq 'Set<GCKeyCode>' "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; th
   echo "bounded keyboard aliases must not require a generic hash set" >&2
   exit 1
 fi
+grep -Fq 'data.reserveCapacity(envelopeLength)' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq '.prepared"' "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'options: .usingNewMetadataOnly' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+if grep -Fq 'data.write(to: url, options: .atomic)' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
+  echo "snapshot protection must be applied before atomic publication" >&2
+  exit 1
+fi
 
 CARGO="$CARGO" CARGO_TARGET_DIR="$TARGET_DIR" \
   "$CRATE/build-xcframework.sh" "$XCFRAMEWORK"
@@ -222,7 +232,10 @@ COMPLETION_LINKED_BYTES=$(stat -f%z "$TEMP/TinyArcadeCompletionSmoke-arm64")
 # keyboard/gamepad adapter and its two-device executable proof fund three more
 # steps for GameController discovery, mapping and disconnect release. Keep these
 # complete boundaries explicit rather than hiding them in an unbounded ceiling.
-MAX_ARM64_LINKED_BYTES=1753088
+# Preparing the complete snapshot beside its destination, applying protection
+# before publication and then replacing the old generation atomically funds one
+# further step. This is the persistence transaction itself, not test scaffolding.
+MAX_ARM64_LINKED_BYTES=1769472
 # The optional SIMD profile keeps v128 inline and adds its portable interpreter
 # path only when explicitly requested. Give that opt-in product two separate
 # 16 KiB graduation steps; never weaken the default iOS product ceiling.

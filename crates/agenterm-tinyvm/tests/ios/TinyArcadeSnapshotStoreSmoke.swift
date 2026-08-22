@@ -38,6 +38,34 @@ private struct TinyArcadeSnapshotStoreSmoke {
         try store.save(runtime: fresh.runtime, gameClockMilliseconds: 123)
         _ = try fresh.runtime.tickMedia(buttons: 1 << 0, clockMilliseconds: 16)
         try store.save(runtime: fresh.runtime, gameClockMilliseconds: 456)
+        let stableSnapshot = try Data(contentsOf: file)
+        let stableAttributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        precondition(
+            stableAttributes[.protectionKey] as? FileProtectionType
+                == .completeUntilFirstUserAuthentication
+        )
+        let initialDirectoryItems = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )
+        precondition(initialDirectoryItems == [file])
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: file.path)
+        let immutableAttributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        precondition(immutableAttributes[.immutable] as? Bool == true)
+        do {
+            try store.save(runtime: fresh.runtime, gameClockMilliseconds: 789)
+            preconditionFailure("immutable published snapshot must reject replacement")
+        } catch let error as TinyArcadeSnapshotStoreError {
+            precondition(error == .storageFailure)
+        }
+        let afterFailedSave = try Data(contentsOf: file)
+        let afterFailureDirectoryItems = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        )
+        precondition(afterFailedSave == stableSnapshot)
+        precondition(afterFailureDirectoryItems == [file])
+        try FileManager.default.setAttributes([.immutable: false], ofItemAtPath: file.path)
         try fresh.runtime.close()
 
         let restored = try store.openSession(makeRuntime: makeRuntime)

@@ -105,6 +105,7 @@ tinyvm iOS game runtime
 │   ├── reviewed install transaction  [x]
 │   ├── private atomic library         [x]
 │   ├── atomic scene persistence      [x]
+│   │   └── protected prepublication replace [x]
 │   ├── replay record/verify owner     [x]
 │   └── on-device lifecycle test      [ ]
 ├── real-game proof                   [~]
@@ -4159,3 +4160,27 @@ runs, renders and snapshots it at 1,767,080 bytes arm64 and 1,852,192 bytes
 x86_64, still inside the existing opt-in budgets. The executable PRD trace now binds
 133 completed claims. Full WebAssembly SIMD remains deliberately open and
 workload-gated; this increment claims only the coherent signed PCM pair.
+
+## One-hundred-thirty-third executable increment — protected snapshot publication
+
+The iOS snapshot store now treats preparation and publication as separate
+phases. It reserves the exact versioned-envelope capacity, writes a uniquely
+named prepared file beside the destination, applies iOS
+complete-until-first-authentication protection to that unpublished file and
+only then moves or replaces the public generation. Every prepublication error
+removes the prepared artifact; an already-published snapshot remains readable
+and byte-for-byte unchanged. Loading the envelope also decodes the game id
+directly from its bounded slice instead of allocating a second `Data` value.
+
+Evidence on 2026-08-22: the linked Swift black box publishes two generations,
+checks the protection class, makes the stable destination immutable and forces
+the next replacement to fail with `storageFailure`. It then proves the stable
+bytes are unchanged, no `.prepared` file remains and the prior 456 ms generation
+still restores. Default iOS device/universal-simulator consumers link at
+1,767,160 / 1,849,120 bytes; the opt-in SIMD consumers link at
+1,768,104 / 1,853,144 bytes, both inside one explicit 16 KiB persistence step.
+All-feature tests, warnings-denied Clippy, rustfmt, ShellCheck and the executable
+PRD map pass; the map now binds 134 completed claims. The real App consumes the
+exact archive and passes eight Depth Well tests, five Signal Lock tests, one UI
+journey and an unsigned arm64 device Release build. Physical-device lifecycle
+and TestFlight evidence remain open, so the persistent goal stays active.
