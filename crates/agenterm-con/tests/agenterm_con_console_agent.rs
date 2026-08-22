@@ -228,6 +228,45 @@ fn a_resize_does_not_end_the_session() {
     );
 }
 
+/// Ctrl+C has to *interrupt*, not arrive as a keystroke.
+///
+/// `WriteConsoleInput` does not raise a console control event -- the console
+/// only synthesizes one for real keyboard input -- so delivering Ctrl+C as a
+/// key record gave the shell the character and not the signal. It echoed
+/// `^C` and went on running whatever it was running. The agent raises
+/// `GenerateConsoleCtrlEvent` instead.
+#[test]
+fn ctrl_c_interrupts_a_running_child_instead_of_being_typed() {
+    let _guard = gui_guard();
+    let session = Session::start("interrupt");
+    session.wait_for_pane("Microsoft Windows", Duration::from_secs(20));
+
+    // A loop that never ends on its own, so anything that stops it can only
+    // be the interrupt. `ping -t` is present on every Windows and prints
+    // continuously, which also proves the child was actually running.
+    session.control(&["send-text", "ping -t 127.0.0.1\r"]);
+    session.wait_for_pane("127.0.0.1", Duration::from_secs(20));
+
+    session.control(&["send-text", "\u{3}"]);
+
+    // The prompt coming back is the proof: the loop ended and the shell is
+    // accepting input again.
+    session.control(&["send-text", "set /a 4242+0\r"]);
+    let pane = session.wait_for_pane("4242", Duration::from_secs(25));
+    assert!(
+        pane.contains("4242"),
+        "the shell never returned to a prompt after Ctrl+C:\n{pane}"
+    );
+
+    let tabs = session.control(&["list-tabs"]);
+    assert!(
+        tabs.contains("\"child_alive\": true"),
+        "Ctrl+C killed the shell rather than the command it was running.\n\
+         tabs: {tabs}\ndiagnostics:\n{}",
+        diagnostics()
+    );
+}
+
 /// A double-width character occupies two console cells carrying the same code
 /// unit. Emitting both is the doubled-CJK bug, and it is invisible in any
 /// ASCII-only test.

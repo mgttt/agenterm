@@ -34,7 +34,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, ReadFile, WriteFile,
 };
 use windows_sys::Win32::System::Console::{
-    AllocConsole, CHAR_INFO, CHAR_INFO_0, COORD, CONSOLE_SCREEN_BUFFER_INFO, FreeConsole,
+    AllocConsole, CHAR_INFO, CHAR_INFO_0, COORD, CONSOLE_SCREEN_BUFFER_INFO, CTRL_BREAK_EVENT,
+    CTRL_C_EVENT, FreeConsole, GenerateConsoleCtrlEvent, SetConsoleCtrlHandler,
     GetConsoleScreenBufferInfo, GetConsoleWindow, INPUT_RECORD, INPUT_RECORD_0, KEY_EVENT,
     KEY_EVENT_RECORD, KEY_EVENT_RECORD_0, ReadConsoleOutputW, SMALL_RECT,
     SetConsoleScreenBufferSize, SetConsoleWindowInfo, WriteConsoleInputW,
@@ -395,6 +396,12 @@ fn run_agent(
     mut command_line: Vec<u16>,
 ) -> io::Result<i32> {
     let console = step("acquire console", ConsoleHandles::acquire())?;
+    // After the console exists and before the child does. A handler registered
+    // against the console this process had at startup does not survive the
+    // FreeConsole/AllocConsole swap above, and an agent without one is killed
+    // by the very interrupt it raises -- taking the shell with it, because the
+    // job object kills on close.
+    install_ctrl_handler();
     step("resize console", console.resize(cols, rows))?;
 
     let job = step("create job", OwnedJob::new())?;
@@ -986,6 +993,55 @@ fn forward_input(input: HANDLE, console_input: HANDLE) {
     }
 }
 
+/// Interrupt bytes, which are signals rather than keys.
+///
+/// `WriteConsoleInput` does not raise a console control event: the console
+/// only synthesizes one for real keyboard input. Delivering Ctrl+C as a key
+/// record therefore gives the child the keystroke and not the interrupt,
+/// which is why a shell echoed `^C` and then carried on running whatever it
+/// was running. `GenerateConsoleCtrlEvent` is the actual signal, and process
+/// group zero means every process attached to this console — the child, its
+/// own children, and the agent itself.
+const CTRL_C_BYTE: u8 = 0x03;
+const CTRL_BREAK_BYTE: u8 = 0x1C;
+
+fn raise_console_signal(event: u32) {
+    unsafe {
+        // SAFETY: no pointers. Group 0 addresses this console's process
+        // group, which is exactly the set this agent created.
+        GenerateConsoleCtrlEvent(event, 0);
+    }
+}
+
+/// Keeps the agent alive through the interrupt it just raised.
+///
+/// The agent shares the console with the child, so it receives the signal
+/// too. Reporting it handled is what stops it from being killed alongside
+/// the process it was trying to interrupt.
+///
+/// Deliberately a handler function rather than `SetConsoleCtrlHandler(None,
+/// TRUE)`: that form sets an *ignore* flag which children inherit, which
+/// would leave the shell unable to be interrupted at all — the same defect
+/// one level down.
+unsafe extern "system" fn agent_ctrl_handler(control_type: u32) -> i32 {
+    i32::from(control_type == CTRL_C_EVENT || control_type == CTRL_BREAK_EVENT)
+}
+
+fn install_ctrl_handler() {
+    unsafe {
+        // Clear any inherited Ctrl+C-ignore flag first. That flag -- set by
+        // `SetConsoleCtrlHandler(None, TRUE)` somewhere up the ancestry -- is
+        // inherited by every descendant, so an agent that keeps it hands a
+        // shell that can never be interrupted to the user. The ConPTY path
+        // clears it for the same reason before creating its child.
+        // SAFETY: affects only this process; no pointers involved.
+        SetConsoleCtrlHandler(None, 0);
+        // SAFETY: the handler is a plain function with the documented
+        // signature and static lifetime.
+        SetConsoleCtrlHandler(Some(agent_ctrl_handler), 1);
+    }
+}
+
 /// Translates as many complete key presses as `bytes` contains, returning how
 /// many bytes were consumed. A partial escape sequence is left for the next
 /// read rather than being delivered as a literal escape.
@@ -993,6 +1049,24 @@ fn write_records(console_input: HANDLE, bytes: &[u8]) -> usize {
     let mut records = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
+        // Signals are handled before decoding, because they are not keys and
+        // must not also arrive as one: the child would then see both an
+        // interrupt and a literal control character.
+        match bytes[index] {
+            CTRL_C_BYTE => {
+                flush_records(console_input, &mut records);
+                raise_console_signal(CTRL_C_EVENT);
+                index += 1;
+                continue;
+            }
+            CTRL_BREAK_BYTE => {
+                flush_records(console_input, &mut records);
+                raise_console_signal(CTRL_BREAK_EVENT);
+                index += 1;
+                continue;
+            }
+            _ => {}
+        }
         let Some((key, used)) = decode_key(&bytes[index..]) else {
             break;
         };
@@ -1000,20 +1074,31 @@ fn write_records(console_input: HANDLE, bytes: &[u8]) -> usize {
         records.push(key_record(key, true));
         records.push(key_record(key, false));
     }
-    if !records.is_empty() {
-        let mut written = 0_u32;
-        unsafe {
-            // SAFETY: records is a live slice of initialized records and
-            // written is a valid out-pointer.
-            WriteConsoleInputW(
-                console_input,
-                records.as_ptr(),
-                records.len() as u32,
-                &mut written,
-            );
-        }
-    }
+    flush_records(console_input, &mut records);
     index
+}
+
+/// Writes and clears whatever has accumulated.
+///
+/// Called before raising a signal as well as at the end, so keystrokes typed
+/// before a Ctrl+C reach the child before the interrupt does rather than
+/// after it.
+fn flush_records(console_input: HANDLE, records: &mut Vec<INPUT_RECORD>) {
+    if records.is_empty() {
+        return;
+    }
+    let mut written = 0_u32;
+    unsafe {
+        // SAFETY: records is a live slice of initialized records and written
+        // is a valid out-pointer.
+        WriteConsoleInputW(
+            console_input,
+            records.as_ptr(),
+            records.len() as u32,
+            &mut written,
+        );
+    }
+    records.clear();
 }
 
 #[derive(Clone, Copy)]
