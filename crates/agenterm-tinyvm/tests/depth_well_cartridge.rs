@@ -368,7 +368,7 @@ fn converter_cli_accepts_the_real_depth_well_cartridge() {
     std::fs::write(&path, wasm).expect("write converter fixture");
     let output = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
         .args(["cartridge", "check"])
-        .arg(path)
+        .arg(&path)
         .output()
         .expect("run converter conformance command");
     assert!(
@@ -380,6 +380,91 @@ fn converter_cli_accepts_the_real_depth_well_cartridge() {
     assert!(stdout.contains("game_id=com.partnernet.depth-well"));
     assert!(stdout.contains("render_stream=tinyarcade:grid3d/v1"));
     assert!(stdout.contains("OK: private-import converter conformance v1"));
+
+    let json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["cartridge", "check"])
+        .arg(&path)
+        .arg("--json")
+        .output()
+        .expect("run JSON converter conformance command");
+    assert!(json.status.success());
+    assert!(json.stderr.is_empty());
+    let wire: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("decode dynamic conformance JSON");
+    assert_eq!(wire["schema"], "tinyarcade-cartridge-conformance-report");
+    assert_eq!(wire["schema_version"], 1);
+    assert_eq!(wire["valid"], true);
+    assert_eq!(wire["static_valid"], true);
+    assert_eq!(wire["dynamic_valid"], true);
+    assert_eq!(wire["deterministic"], true);
+    assert_eq!(wire["cartridge"]["game_id"], "com.partnernet.depth-well");
+    assert_eq!(wire["cartridge"]["wasm_bytes"], 6_116);
+    assert_eq!(wire["evidence"]["render_stream"], "tinyarcade:grid3d/v1");
+    assert_eq!(wire["evidence"]["initial_render_bytes"], 96);
+    assert_eq!(
+        wire["evidence"]["expected_render_bytes"],
+        wire["evidence"]["replay_render_bytes"]
+    );
+    assert_eq!(
+        wire["evidence"]["expected_audio_bytes"],
+        wire["evidence"]["replay_audio_bytes"]
+    );
+    assert_eq!(
+        wire["evidence"]["lifecycle_stats"]["initial_tick"]["render_bytes"],
+        wire["evidence"]["initial_render_bytes"]
+    );
+    assert!(
+        wire["evidence"]["lifecycle_stats"]["initial_tick"]["wasm_steps"]
+            .as_u64()
+            .is_some_and(|steps| steps > 0)
+    );
+    assert_eq!(wire["error"], serde_json::Value::Null);
+    assert_eq!(wire.as_object().expect("dynamic report object").len(), 10);
+    assert_eq!(
+        wire["cartridge"]
+            .as_object()
+            .expect("dynamic cartridge object")
+            .len(),
+        8
+    );
+    assert_eq!(
+        wire["limits"]
+            .as_object()
+            .expect("dynamic limits object")
+            .len(),
+        8
+    );
+    assert_eq!(
+        wire["evidence"]
+            .as_object()
+            .expect("dynamic evidence object")
+            .len(),
+        11
+    );
+    assert_eq!(
+        wire["evidence"]["lifecycle_stats"]
+            .as_object()
+            .expect("lifecycle stats object")
+            .len(),
+        7
+    );
+    assert_eq!(
+        wire["evidence"]["lifecycle_stats"]["initial_tick"]
+            .as_object()
+            .expect("one lifecycle stats object")
+            .len(),
+        9
+    );
+
+    let repeated = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["cartridge", "check"])
+        .arg(&path)
+        .arg("--json")
+        .output()
+        .expect("repeat JSON converter conformance command");
+    assert!(repeated.status.success());
+    assert_eq!(repeated.stdout, json.stdout);
+    assert!(repeated.stderr.is_empty());
 }
 
 #[cfg(feature = "cartridge-trust")]

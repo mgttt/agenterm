@@ -22,9 +22,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
 use agenterm_tinyvm::{
-    CartridgeDescriptor, CartridgeManifest, GameInput, GameLimits, GameRuntime, HostProfileV1,
-    Limits, MAX_HOST_PROFILE_BYTES, RenderFrame, ToneBatch, Vm, WasmError, WasmFeatureUsage,
-    WasmModule,
+    CartridgeDescriptor, CartridgeManifest, ExecutionStats, GameInput, GameLimits, GameRuntime,
+    HostProfileV1, Limits, MAX_HOST_PROFILE_BYTES, RenderFrame, ToneBatch, Vm, WasmError,
+    WasmFeatureUsage, WasmModule,
 };
 #[cfg(feature = "catalog-publisher")]
 use agenterm_tinyvm::{CartridgeTrustStore, CatalogEntry, cartridge_sha256};
@@ -66,11 +66,14 @@ fn main() -> ExitCode {
         },
         Some("cartridge") => match args.next().as_deref() {
             Some("inspect") => match (args.next(), args.next()) {
-                (Some(path), None) => run_cartridge(&path, false),
+                (Some(path), None) => run_cartridge_inspect(&path),
                 _ => usage(),
             },
-            Some("check") => match (args.next(), args.next()) {
-                (Some(path), None) => run_cartridge(&path, true),
+            Some("check") => match (args.next(), args.next(), args.next()) {
+                (Some(path), None, None) => run_cartridge_check(&path, ReportFormat::Text),
+                (Some(path), Some(format), None) if format == "--json" => {
+                    run_cartridge_check(&path, ReportFormat::Json)
+                }
                 _ => usage(),
             },
             Some("check-profile") => match (args.next(), args.next(), args.next(), args.next()) {
@@ -170,7 +173,7 @@ fn usage() -> ExitCode {
     eprintln!("  tinyvm eval [asm...]");
     eprintln!("  tinyvm module validate FILE.wasm");
     eprintln!("  tinyvm cartridge inspect FILE.wasm");
-    eprintln!("  tinyvm cartridge check FILE.wasm");
+    eprintln!("  tinyvm cartridge check FILE.wasm [--json]");
     eprintln!("  tinyvm cartridge check-profile FILE.wasm HOST.tahost [--json]");
     eprintln!(
         "  tinyvm cartridge attach-manifest INPUT.wasm OUTPUT.wasm GAME_ID GAME_VERSION ABI_VERSION STATE_VERSION"
@@ -691,60 +694,9 @@ fn read_signing_seed(path: &Path) -> Result<[u8; 32], String> {
 
 #[cfg(feature = "catalog-publisher")]
 fn validate_publishable_cartridge(wasm: &[u8]) -> Result<CartridgeManifest, String> {
-    let manifest = CartridgeManifest::from_wasm(wasm).map_err(|error| error.message())?;
-    WasmModule::from_bytes_with(
-        wasm,
-        Limits {
-            max_table_elems: 1_024,
-            max_memory_pages: 64,
-            max_steps: 1_000_000,
-            ..Limits::default()
-        },
-    )
-    .map_err(|error| error.message())?;
-    let vm_limits = Limits {
-        max_table_elems: 1_024,
-        max_memory_pages: 64,
-        max_steps: 1_000_000,
-        ..Limits::default()
-    };
-    let game_limits = GameLimits {
-        max_render_bytes: 64 * 1024,
-        max_audio_bytes: 16 * 1024,
-        max_state_bytes: 256 * 1024,
-    };
-    let mut first = GameRuntime::from_private_bytes(wasm, vm_limits, game_limits, 0x5441_4331)
-        .map_err(|error| error.message())?;
-    let frame = first
-        .tick(GameInput {
-            buttons: 0,
-            clock_ms: 0,
-        })
-        .map_err(|error| error.message())?;
-    validate_media(&frame.render, &frame.audio).map_err(|error| error.message())?;
-    let snapshot = first.suspend().map_err(|error| error.message())?;
-    let expected = first
-        .tick(GameInput {
-            buttons: 0,
-            clock_ms: 16,
-        })
-        .map_err(|error| error.message())?;
-    let mut restored = GameRuntime::from_private_bytes(wasm, vm_limits, game_limits, 0x5441_4331)
-        .map_err(|error| error.message())?;
-    restored
-        .resume(&snapshot)
-        .map_err(|error| error.message())?;
-    let replay = restored
-        .tick(GameInput {
-            buttons: 0,
-            clock_ms: 16,
-        })
-        .map_err(|error| error.message())?;
-    validate_media(&replay.render, &replay.audio).map_err(|error| error.message())?;
-    if expected.render != replay.render || expected.audio != replay.audio {
-        return Err("suspend/resume replay is not byte-deterministic".into());
-    }
-    Ok(manifest)
+    check_cartridge_bytes(wasm)
+        .map(|report| report.descriptor.manifest)
+        .map_err(|failure| failure.message)
 }
 
 #[cfg(feature = "catalog-publisher")]
@@ -1100,31 +1052,7 @@ fn compatibility_report_json(
     output.push_str("],\"unsupported_features\":[");
     push_json_strings(&mut output, unsupported.iter().copied());
     output.push_str("],\"function_imports\":[");
-    for (index, import) in descriptor.imports.iter().enumerate() {
-        if index != 0 {
-            output.push(',');
-        }
-        output.push_str("{\"module\":");
-        push_json_string(&mut output, &import.module);
-        output.push_str(",\"field\":");
-        push_json_string(&mut output, &import.field);
-        output.push_str(",\"class\":");
-        push_json_string(
-            &mut output,
-            if import.module == "tinyarcade:core/v1" {
-                "core"
-            } else {
-                "native"
-            },
-        );
-        output.push_str(",\"params\":");
-        output.push_str(&import.n_params.to_string());
-        output.push_str(",\"results\":");
-        output.push_str(&import.n_results.to_string());
-        output.push_str(",\"i32_only\":");
-        output.push_str(if import.i32_only { "true" } else { "false" });
-        output.push('}');
-    }
+    push_function_imports_json(&mut output, &descriptor.imports);
     output.push_str("],\"issues\":[");
     for (index, issue) in report.issues.iter().enumerate() {
         if index != 0 {
@@ -1228,32 +1156,168 @@ fn wasm_feature_names(features: WasmFeatureUsage) -> impl Iterator<Item = &'stat
     .filter_map(|(used, name)| used.then_some(name))
 }
 
-fn run_cartridge(path: &str, execute: bool) -> ExitCode {
-    let bytes = match read_cartridge(path) {
-        Ok(bytes) => bytes,
-        Err(message) => {
-            eprintln!("tinyvm: {message}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let descriptor = match CartridgeDescriptor::inspect(
-        &bytes,
-        Limits {
-            max_table_elems: 1_024,
-            max_memory_pages: 64,
-            max_steps: 1_000_000,
-            ..Limits::default()
-        },
-    ) {
-        Ok(descriptor) => descriptor,
-        Err(error) => return cartridge_error(error),
-    };
+fn converter_vm_limits() -> Limits {
+    Limits {
+        max_table_elems: 1_024,
+        max_memory_pages: 64,
+        max_steps: 1_000_000,
+        ..Limits::default()
+    }
+}
+
+fn converter_game_limits() -> GameLimits {
+    GameLimits {
+        max_render_bytes: 64 * 1024,
+        max_audio_bytes: 16 * 1024,
+        max_state_bytes: 256 * 1024,
+    }
+}
+
+struct CartridgeConformanceReport {
+    descriptor: CartridgeDescriptor,
+    wasm_bytes: usize,
+    evidence: DynamicConformanceEvidence,
+}
+
+struct DynamicConformanceEvidence {
+    initial_media: ValidatedMedia,
+    initial_render_bytes: usize,
+    initial_audio_bytes: usize,
+    snapshot_bytes: usize,
+    expected_render_bytes: usize,
+    expected_audio_bytes: usize,
+    replay_render_bytes: usize,
+    replay_audio_bytes: usize,
+    initial_init: ExecutionStats,
+    initial_tick: ExecutionStats,
+    suspend: ExecutionStats,
+    expected_tick: ExecutionStats,
+    restored_init: ExecutionStats,
+    resume: ExecutionStats,
+    replay_tick: ExecutionStats,
+}
+
+struct CartridgeConformanceFailure {
+    descriptor: Option<Box<CartridgeDescriptor>>,
+    stage: &'static str,
+    message: String,
+}
+
+struct DynamicConformanceFailure {
+    stage: &'static str,
+    message: String,
+}
+
+fn dynamic_failure(stage: &'static str, error: WasmError) -> DynamicConformanceFailure {
+    DynamicConformanceFailure {
+        stage,
+        message: error.message().to_string(),
+    }
+}
+
+fn execute_cartridge_conformance(
+    bytes: &[u8],
+) -> Result<DynamicConformanceEvidence, DynamicConformanceFailure> {
+    let vm_limits = converter_vm_limits();
+    let game_limits = converter_game_limits();
+    let mut first = GameRuntime::from_private_bytes(bytes, vm_limits, game_limits, 0x5441_4331)
+        .map_err(|error| dynamic_failure("initialization", error))?;
+    let initial_init = first.last_execution_stats();
+    let initial = first
+        .tick(GameInput {
+            buttons: 0,
+            clock_ms: 0,
+        })
+        .map_err(|error| dynamic_failure("initial_tick", error))?;
+    let initial_tick = first.last_execution_stats();
+    let initial_media = validate_media(&initial.render, &initial.audio)
+        .map_err(|error| dynamic_failure("initial_media", error))?;
+    let snapshot = first
+        .suspend()
+        .map_err(|error| dynamic_failure("suspend", error))?;
+    let suspend = first.last_execution_stats();
+    let expected = first
+        .tick(GameInput {
+            buttons: 0,
+            clock_ms: 16,
+        })
+        .map_err(|error| dynamic_failure("expected_tick", error))?;
+    let expected_tick = first.last_execution_stats();
+    validate_media(&expected.render, &expected.audio)
+        .map_err(|error| dynamic_failure("expected_media", error))?;
+    let mut restored = GameRuntime::from_private_bytes(bytes, vm_limits, game_limits, 0x5441_4331)
+        .map_err(|error| dynamic_failure("restore_initialization", error))?;
+    let restored_init = restored.last_execution_stats();
+    restored
+        .resume(&snapshot)
+        .map_err(|error| dynamic_failure("resume", error))?;
+    let resume = restored.last_execution_stats();
+    let replay = restored
+        .tick(GameInput {
+            buttons: 0,
+            clock_ms: 16,
+        })
+        .map_err(|error| dynamic_failure("replay_tick", error))?;
+    let replay_tick = restored.last_execution_stats();
+    validate_media(&replay.render, &replay.audio)
+        .map_err(|error| dynamic_failure("replay_media", error))?;
+    if expected.render != replay.render || expected.audio != replay.audio {
+        return Err(DynamicConformanceFailure {
+            stage: "determinism",
+            message: "suspend/resume replay is not byte-deterministic".into(),
+        });
+    }
+    Ok(DynamicConformanceEvidence {
+        initial_media,
+        initial_render_bytes: initial.render.len(),
+        initial_audio_bytes: initial.audio.len(),
+        snapshot_bytes: snapshot.len(),
+        expected_render_bytes: expected.render.len(),
+        expected_audio_bytes: expected.audio.len(),
+        replay_render_bytes: replay.render.len(),
+        replay_audio_bytes: replay.audio.len(),
+        initial_init,
+        initial_tick,
+        suspend,
+        expected_tick,
+        restored_init,
+        resume,
+        replay_tick,
+    })
+}
+
+fn check_cartridge_bytes(
+    bytes: &[u8],
+) -> Result<CartridgeConformanceReport, CartridgeConformanceFailure> {
+    let descriptor =
+        CartridgeDescriptor::inspect(bytes, converter_vm_limits()).map_err(|error| {
+            CartridgeConformanceFailure {
+                descriptor: None,
+                stage: "static_validation",
+                message: error.message().to_string(),
+            }
+        })?;
+    match execute_cartridge_conformance(bytes) {
+        Ok(evidence) => Ok(CartridgeConformanceReport {
+            descriptor,
+            wasm_bytes: bytes.len(),
+            evidence,
+        }),
+        Err(failure) => Err(CartridgeConformanceFailure {
+            descriptor: Some(Box::new(descriptor)),
+            stage: failure.stage,
+            message: failure.message,
+        }),
+    }
+}
+
+fn print_cartridge_descriptor(descriptor: &CartridgeDescriptor, wasm_bytes: usize) {
     let manifest = &descriptor.manifest;
     println!("game_id={}", manifest.game_id);
     println!("game_version={}", manifest.game_version);
     println!("abi_version={}", manifest.abi_version);
     println!("state_version={}", manifest.state_version);
-    println!("wasm_bytes={}", bytes.len());
+    println!("wasm_bytes={wasm_bytes}");
     if !manifest.capabilities.is_empty() {
         println!("native_capabilities={}", manifest.capabilities.join(","));
     } else {
@@ -1271,85 +1335,277 @@ fn run_cartridge(path: &str, execute: bool) -> ExitCode {
             import.module, import.field, import.n_params, import.n_results, import.i32_only
         );
     }
-    if !execute {
-        println!("OK: canonical TinyArcade manifest and parseable WASM module");
-        return ExitCode::SUCCESS;
-    }
+}
 
-    let vm_limits = Limits {
-        max_table_elems: 1_024,
-        max_memory_pages: 64,
-        max_steps: 1_000_000,
-        ..Limits::default()
-    };
-    let game_limits = GameLimits {
-        max_render_bytes: 64 * 1024,
-        max_audio_bytes: 16 * 1024,
-        max_state_bytes: 256 * 1024,
-    };
-    let mut first =
-        match GameRuntime::from_private_bytes(&bytes, vm_limits, game_limits, 0x5441_4331) {
-            Ok(runtime) => runtime,
-            Err(error) => return cartridge_error(error),
-        };
-    let initial = match first.tick(GameInput {
-        buttons: 0,
-        clock_ms: 0,
-    }) {
-        Ok(frame) => frame,
-        Err(error) => return cartridge_error(error),
-    };
-    let initial_media = match validate_media(&initial.render, &initial.audio) {
-        Ok(media) => media,
-        Err(error) => return cartridge_error(error),
-    };
-    let snapshot = match first.suspend() {
-        Ok(snapshot) => snapshot,
-        Err(error) => return cartridge_error(error),
-    };
-    let expected = match first.tick(GameInput {
-        buttons: 0,
-        clock_ms: 16,
-    }) {
-        Ok(frame) => frame,
-        Err(error) => return cartridge_error(error),
-    };
-    let mut restored =
-        match GameRuntime::from_private_bytes(&bytes, vm_limits, game_limits, 0x5441_4331) {
-            Ok(runtime) => runtime,
-            Err(error) => return cartridge_error(error),
-        };
-    if let Err(error) = restored.resume(&snapshot) {
-        return cartridge_error(error);
-    }
-    let replay = match restored.tick(GameInput {
-        buttons: 0,
-        clock_ms: 16,
-    }) {
-        Ok(frame) => frame,
-        Err(error) => return cartridge_error(error),
-    };
-    if let Err(error) = validate_media(&replay.render, &replay.audio) {
-        return cartridge_error(error);
-    }
-    if expected.render != replay.render || expected.audio != replay.audio {
-        eprintln!("tinyvm: suspend/resume replay is not byte-deterministic");
-        return ExitCode::FAILURE;
-    }
-    println!("render_stream={}", initial_media.render_stream);
-    println!("initial_render_bytes={}", initial.render.len());
-    match initial_media.application_metadata_schema {
+fn print_dynamic_evidence(evidence: &DynamicConformanceEvidence) {
+    println!("render_stream={}", evidence.initial_media.render_stream);
+    println!("initial_render_bytes={}", evidence.initial_render_bytes);
+    match evidence.initial_media.application_metadata_schema {
         Some(schema) => println!("application_metadata_schema=0x{schema:08x}"),
         None => println!("application_metadata_schema=none"),
     }
     println!(
         "application_metadata_bytes={}",
-        initial_media.application_metadata_bytes
+        evidence.initial_media.application_metadata_bytes
     );
-    println!("initial_audio_bytes={}", initial.audio.len());
-    println!("snapshot_bytes={}", snapshot.len());
-    println!("OK: private-import converter conformance v1");
-    ExitCode::SUCCESS
+    println!("initial_audio_bytes={}", evidence.initial_audio_bytes);
+    println!("snapshot_bytes={}", evidence.snapshot_bytes);
+}
+
+fn run_cartridge_inspect(path: &str) -> ExitCode {
+    let bytes = match read_cartridge(path) {
+        Ok(bytes) => bytes,
+        Err(message) => {
+            eprintln!("tinyvm: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match CartridgeDescriptor::inspect(&bytes, converter_vm_limits()) {
+        Ok(descriptor) => {
+            print_cartridge_descriptor(&descriptor, bytes.len());
+            println!("OK: canonical TinyArcade manifest and parseable WASM module");
+            ExitCode::SUCCESS
+        }
+        Err(error) => cartridge_error(error),
+    }
+}
+
+fn run_cartridge_check(path: &str, format: ReportFormat) -> ExitCode {
+    let bytes = match read_cartridge(path) {
+        Ok(bytes) => bytes,
+        Err(message) => {
+            if format == ReportFormat::Json {
+                println!(
+                    "{}",
+                    cartridge_conformance_error_json(None, None, "input", message)
+                );
+            } else {
+                eprintln!("tinyvm: {message}");
+            }
+            return ExitCode::FAILURE;
+        }
+    };
+    match check_cartridge_bytes(&bytes) {
+        Ok(report) if format == ReportFormat::Json => {
+            println!("{}", cartridge_conformance_report_json(&report));
+            ExitCode::SUCCESS
+        }
+        Ok(report) => {
+            print_cartridge_descriptor(&report.descriptor, report.wasm_bytes);
+            print_dynamic_evidence(&report.evidence);
+            println!("OK: private-import converter conformance v1");
+            ExitCode::SUCCESS
+        }
+        Err(failure) if format == ReportFormat::Json => {
+            println!(
+                "{}",
+                cartridge_conformance_error_json(
+                    failure.descriptor.as_deref(),
+                    Some(bytes.len()),
+                    failure.stage,
+                    &failure.message,
+                )
+            );
+            ExitCode::FAILURE
+        }
+        Err(failure) => {
+            if let Some(descriptor) = failure.descriptor.as_deref() {
+                print_cartridge_descriptor(descriptor, bytes.len());
+            }
+            eprintln!("tinyvm: {}", failure.message);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn cartridge_conformance_report_json(report: &CartridgeConformanceReport) -> String {
+    let mut output = String::new();
+    output.push_str("{\"schema\":\"tinyarcade-cartridge-conformance-report\",\"schema_version\":1,\"valid\":true,\"static_valid\":true,\"dynamic_valid\":true,\"deterministic\":true,\"cartridge\":");
+    push_dynamic_cartridge_json(&mut output, &report.descriptor, report.wasm_bytes);
+    output.push_str(",\"limits\":");
+    push_converter_limits_json(&mut output);
+    output.push_str(",\"evidence\":{");
+    output.push_str("\"render_stream\":");
+    push_json_string(&mut output, report.evidence.initial_media.render_stream);
+    output.push_str(",\"initial_render_bytes\":");
+    output.push_str(&report.evidence.initial_render_bytes.to_string());
+    output.push_str(",\"application_metadata_schema\":");
+    match report.evidence.initial_media.application_metadata_schema {
+        Some(schema) => output.push_str(&schema.to_string()),
+        None => output.push_str("null"),
+    }
+    output.push_str(",\"application_metadata_bytes\":");
+    output.push_str(
+        &report
+            .evidence
+            .initial_media
+            .application_metadata_bytes
+            .to_string(),
+    );
+    output.push_str(",\"initial_audio_bytes\":");
+    output.push_str(&report.evidence.initial_audio_bytes.to_string());
+    output.push_str(",\"snapshot_bytes\":");
+    output.push_str(&report.evidence.snapshot_bytes.to_string());
+    output.push_str(",\"expected_render_bytes\":");
+    output.push_str(&report.evidence.expected_render_bytes.to_string());
+    output.push_str(",\"expected_audio_bytes\":");
+    output.push_str(&report.evidence.expected_audio_bytes.to_string());
+    output.push_str(",\"replay_render_bytes\":");
+    output.push_str(&report.evidence.replay_render_bytes.to_string());
+    output.push_str(",\"replay_audio_bytes\":");
+    output.push_str(&report.evidence.replay_audio_bytes.to_string());
+    output.push_str(",\"lifecycle_stats\":{");
+    for (index, (name, stats)) in [
+        ("initial_init", report.evidence.initial_init),
+        ("initial_tick", report.evidence.initial_tick),
+        ("suspend", report.evidence.suspend),
+        ("expected_tick", report.evidence.expected_tick),
+        ("restored_init", report.evidence.restored_init),
+        ("resume", report.evidence.resume),
+        ("replay_tick", report.evidence.replay_tick),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index != 0 {
+            output.push(',');
+        }
+        push_json_string(&mut output, name);
+        output.push(':');
+        push_execution_stats_json(&mut output, stats);
+    }
+    output.push_str("}},\"error\":null}");
+    output
+}
+
+fn cartridge_conformance_error_json(
+    descriptor: Option<&CartridgeDescriptor>,
+    wasm_bytes: Option<usize>,
+    stage: &str,
+    message: &str,
+) -> String {
+    let static_valid = descriptor.is_some();
+    let mut output = String::new();
+    output.push_str("{\"schema\":\"tinyarcade-cartridge-conformance-report\",\"schema_version\":1,\"valid\":false,\"static_valid\":");
+    output.push_str(if static_valid { "true" } else { "false" });
+    output.push_str(",\"dynamic_valid\":false,\"deterministic\":");
+    if stage == "determinism" {
+        output.push_str("false");
+    } else {
+        output.push_str("null");
+    }
+    output.push_str(",\"cartridge\":");
+    match (descriptor, wasm_bytes) {
+        (Some(descriptor), Some(wasm_bytes)) => {
+            push_dynamic_cartridge_json(&mut output, descriptor, wasm_bytes)
+        }
+        _ => output.push_str("null"),
+    }
+    output.push_str(",\"limits\":");
+    push_converter_limits_json(&mut output);
+    output.push_str(",\"evidence\":null,\"error\":{\"stage\":");
+    push_json_string(&mut output, stage);
+    output.push_str(",\"message\":");
+    push_json_string(&mut output, message);
+    output.push_str("}}");
+    output
+}
+
+fn push_dynamic_cartridge_json(
+    output: &mut String,
+    descriptor: &CartridgeDescriptor,
+    wasm_bytes: usize,
+) {
+    let manifest = &descriptor.manifest;
+    output.push_str("{\"game_id\":");
+    push_json_string(output, &manifest.game_id);
+    output.push_str(",\"game_version\":");
+    push_json_string(output, &manifest.game_version);
+    output.push_str(",\"abi_version\":");
+    output.push_str(&manifest.abi_version.to_string());
+    output.push_str(",\"state_version\":");
+    output.push_str(&manifest.state_version.to_string());
+    output.push_str(",\"wasm_bytes\":");
+    output.push_str(&wasm_bytes.to_string());
+    output.push_str(",\"native_capabilities\":[");
+    push_json_strings(output, manifest.capabilities.iter().map(String::as_str));
+    output.push_str("],\"wasm_features\":[");
+    push_json_strings(output, wasm_feature_names(descriptor.features));
+    output.push_str("],\"function_imports\":[");
+    push_function_imports_json(output, &descriptor.imports);
+    output.push_str("]}");
+}
+
+fn push_function_imports_json(output: &mut String, imports: &[agenterm_tinyvm::ImportDesc]) {
+    for (index, import) in imports.iter().enumerate() {
+        if index != 0 {
+            output.push(',');
+        }
+        output.push_str("{\"module\":");
+        push_json_string(output, &import.module);
+        output.push_str(",\"field\":");
+        push_json_string(output, &import.field);
+        output.push_str(",\"class\":");
+        push_json_string(
+            output,
+            if import.module == "tinyarcade:core/v1" {
+                "core"
+            } else {
+                "native"
+            },
+        );
+        output.push_str(",\"params\":");
+        output.push_str(&import.n_params.to_string());
+        output.push_str(",\"results\":");
+        output.push_str(&import.n_results.to_string());
+        output.push_str(",\"i32_only\":");
+        output.push_str(if import.i32_only { "true" } else { "false" });
+        output.push('}');
+    }
+}
+
+fn push_converter_limits_json(output: &mut String) {
+    let vm = converter_vm_limits();
+    let game = converter_game_limits();
+    output.push_str("{\"max_table_elems\":");
+    output.push_str(&vm.max_table_elems.to_string());
+    output.push_str(",\"max_memory_pages\":");
+    output.push_str(&vm.max_memory_pages.to_string());
+    output.push_str(",\"max_steps\":");
+    output.push_str(&vm.max_steps.to_string());
+    output.push_str(",\"max_call_depth\":");
+    output.push_str(&vm.max_call_depth.to_string());
+    output.push_str(",\"max_activation_slots\":");
+    output.push_str(&vm.max_activation_slots.to_string());
+    output.push_str(",\"max_render_bytes\":");
+    output.push_str(&game.max_render_bytes.to_string());
+    output.push_str(",\"max_audio_bytes\":");
+    output.push_str(&game.max_audio_bytes.to_string());
+    output.push_str(",\"max_state_bytes\":");
+    output.push_str(&game.max_state_bytes.to_string());
+    output.push('}');
+}
+
+fn push_execution_stats_json(output: &mut String, stats: ExecutionStats) {
+    output.push_str("{\"wasm_steps\":");
+    output.push_str(&stats.wasm_steps.to_string());
+    output.push_str(",\"peak_call_depth\":");
+    output.push_str(&stats.peak_call_depth.to_string());
+    output.push_str(",\"peak_activation_slots\":");
+    output.push_str(&stats.peak_activation_slots.to_string());
+    output.push_str(",\"memory_pages\":");
+    output.push_str(&stats.memory_pages.to_string());
+    output.push_str(",\"table_elements\":");
+    output.push_str(&stats.table_elements.to_string());
+    output.push_str(",\"native_calls\":");
+    output.push_str(&stats.native_calls.to_string());
+    output.push_str(",\"render_bytes\":");
+    output.push_str(&stats.render_bytes.to_string());
+    output.push_str(",\"audio_bytes\":");
+    output.push_str(&stats.audio_bytes.to_string());
+    output.push_str(",\"state_bytes\":");
+    output.push_str(&stats.state_bytes.to_string());
+    output.push('}');
 }
 
 struct ValidatedMedia {

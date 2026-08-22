@@ -2794,6 +2794,15 @@ functions, correct control-character escaping and deterministic ordering. Keep
 paths, timestamps and callbacks out so identical cartridge/profile bytes yield
 identical reports.
 
+Do not merge static host compatibility and dynamic cartridge conformance into
+one vague `valid` claim. Static checking must remain callback-free and report
+feature/import availability for an exact host profile. Dynamic checking must
+instantiate under the private/core-only policy, validate media, suspend into a
+fresh instance, compare replay bytes and expose deterministic lifecycle resource
+stats. Give failures stable stage identifiers and represent an unevaluated
+determinism claim as `null`, not `false`. Reuse that structured dynamic function
+from publication code so the publisher cannot drift to a weaker duplicate gate.
+
 Boundary benchmarks must measure the direction and ownership operation they
 claim. Host-to-guest calls plus an external memory view do not measure a guest-
 to-host import. Use one validated Wasm fixture with explicit wrapper exports,

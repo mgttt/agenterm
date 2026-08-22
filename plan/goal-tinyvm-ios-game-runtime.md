@@ -4548,3 +4548,38 @@ exact current archive (SHA-256
 `582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`).
 Physical-iPhone lifecycle and TestFlight install/play evidence remain open, so
 the persistent goal stays active.
+
+## One-hundred-forty-seventh executable increment — dynamic cartridge conformance report
+
+The converter-facing `cartridge check FILE --json` command now emits the
+versioned `tinyarcade-cartridge-conformance-report` schema 1. It deliberately
+complements rather than replaces the static `check-profile` report: static
+compatibility proves that a host import table can load the cartridge, while
+dynamic conformance boots the private core and executes initialization, tick,
+media validation, suspend, continued execution, restoration, resume and replay.
+The catalog publisher and converter share the same structured execution gate,
+so publication cannot silently use a weaker duplicate validator.
+
+Every report has the same ten top-level fields and names the exact failure
+stage. Successful evidence includes cartridge identity and capabilities,
+effective limits, render/audio sizes, optional metadata, snapshot size and
+seven lifecycle `ExecutionStats` records. Determinism is `true` only after the
+post-restore render and audio bytes match continued execution; it is `false`
+only for an observed mismatch and `null` when execution failed before that
+claim could be evaluated. Input, static-validation, media and lifecycle errors
+therefore remain machine-distinguishable without inventing evidence.
+
+Evidence on 2026-08-22: real Depth Well, Paddle Guard and Signal Lock cartridges
+produce deterministic parseable reports, preserve their distinct media and
+metadata contracts and emit byte-identical JSON on repeated runs. Independent
+failure fixtures cover a missing file, malformed module, valid cartridge with
+invalid media and a hidden mutable-global cartridge whose incomplete snapshot
+causes a deliberate replay mismatch. The 155-claim executable PRD map, complete
+all-feature suite, warnings-denied Clippy, rustfmt and the unchanged
+101,256-byte stripped static core pass. The real Nostalgia Arcade consumer
+passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
+journey and an arm64 device Release build while consuming the exact current
+archive (SHA-256
+`582cec824fd318aec8f1e867ea4df4292ed90ffc183dd1793703c250a1a601f7`).
+Physical-iPhone lifecycle and TestFlight install/play evidence remain open, so
+the persistent goal stays active.

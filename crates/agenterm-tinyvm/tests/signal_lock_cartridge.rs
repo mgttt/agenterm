@@ -145,6 +145,24 @@ fn signal_lock_converter_reports_bounded_application_metadata() {
     assert!(stdout.contains("initial_render_bytes=19324"));
     assert!(stdout.contains("application_metadata_schema=0x31474c53"));
     assert!(stdout.contains("application_metadata_bytes=64"));
+
+    let json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["cartridge", "check"])
+        .arg(&cartridge)
+        .arg("--json")
+        .output()
+        .expect("run JSON converter check");
+    assert!(json.status.success());
+    assert!(json.stderr.is_empty());
+    let wire: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("decode metadata conformance JSON");
+    assert_eq!(wire["valid"], true);
+    assert_eq!(wire["evidence"]["initial_render_bytes"], 19_324);
+    assert_eq!(
+        wire["evidence"]["application_metadata_schema"],
+        0x3147_4c53u32
+    );
+    assert_eq!(wire["evidence"]["application_metadata_bytes"], 64);
 }
 
 #[test]

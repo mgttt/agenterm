@@ -505,6 +505,63 @@ fn indexed2d_frame_with_metadata() -> Vec<u8> {
     bytes
 }
 
+fn nondeterministic_converter_cartridge() -> Vec<u8> {
+    let wasm = wat::parse_str(
+        r#"(module
+          (import "tinyarcade:core/v1" "indexed2d_version" (func $version (result i32)))
+          (import "tinyarcade:core/v1" "submit_render" (func $render (param i32 i32) (result i32)))
+          (import "tinyarcade:core/v1" "save_state" (func $save (param i32 i32) (result i32)))
+          (import "tinyarcade:core/v1" "load_state" (func $load (param i32 i32) (result i32)))
+          (memory 1)
+          (global $hidden (mut i32) (i32.const 0))
+          (data (i32.const 0)
+            "\54\41\49\32\01\00\10\00\01\00\01\00\03\00\00\00\00\00\00\ff\ff\00\00\ff\00\ff\00\ff\00")
+          (func (export "game_abi_version") (result i32) i32.const 1)
+          (func (export "game_init") (result i32) i32.const 0)
+          (func (export "game_tick") (result i32)
+            call $version
+            drop
+            global.get $hidden
+            i32.const 1
+            i32.add
+            global.set $hidden
+            i32.const 28
+            global.get $hidden
+            i32.const 3
+            i32.rem_u
+            i32.store8
+            i32.const 0
+            i32.const 29
+            call $render
+            drop
+            i32.const 0)
+          (func (export "game_suspend") (result i32)
+            i32.const 64
+            i32.const 0
+            call $save
+            drop
+            i32.const 0)
+          (func (export "game_resume") (result i32)
+            i32.const 64
+            i32.const 0
+            call $load
+            drop
+            i32.const 0))"#,
+    )
+    .expect("encode nondeterministic converter fixture");
+    must_ok(
+        CartridgeManifest {
+            game_id: "test.nondeterministic".into(),
+            game_version: "1.0.0".into(),
+            abi_version: 1,
+            state_version: 1,
+            capabilities: Vec::new(),
+        }
+        .append_to_wasm(&wasm),
+        "attach nondeterministic fixture manifest",
+    )
+}
+
 #[test]
 fn standard_wasm_cartridge_drives_one_bounded_frame() {
     let wasm = game_module(&all_imports(), 1, &tick_with_outputs(3), &[1, 2, 3, 4, 5]);
@@ -1027,6 +1084,112 @@ fn host_profile_cli_publishes_inspects_and_checks_without_execution() {
             .expect("invalid report object")
             .len(),
         5
+    );
+}
+
+#[test]
+fn dynamic_converter_json_distinguishes_static_media_and_determinism_failures() {
+    let directory = tempfile::tempdir().expect("temporary dynamic report directory");
+
+    let missing = directory.path().join("missing.wasm");
+    let missing_output = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["cartridge", "check"])
+        .arg(&missing)
+        .arg("--json")
+        .output()
+        .expect("report missing dynamic cartridge");
+    assert!(!missing_output.status.success());
+    assert!(missing_output.stderr.is_empty());
+    let missing_wire: serde_json::Value =
+        serde_json::from_slice(&missing_output.stdout).expect("decode input error report");
+    assert_eq!(missing_wire["static_valid"], false);
+    assert_eq!(missing_wire["error"]["stage"], "input");
+    assert_eq!(missing_wire["error"]["message"], "cannot stat cartridge");
+
+    let malformed = directory.path().join("malformed.wasm");
+    std::fs::write(&malformed, b"not-wasm").expect("write malformed cartridge");
+    let malformed_output = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["cartridge", "check"])
+        .arg(&malformed)
+        .arg("--json")
+        .output()
+        .expect("report malformed dynamic cartridge");
+    assert!(!malformed_output.status.success());
+    assert!(malformed_output.stderr.is_empty());
+    let malformed_wire: serde_json::Value =
+        serde_json::from_slice(&malformed_output.stdout).expect("decode malformed dynamic report");
+    assert_eq!(malformed_wire["valid"], false);
+    assert_eq!(malformed_wire["static_valid"], false);
+    assert_eq!(malformed_wire["dynamic_valid"], false);
+    assert!(malformed_wire["deterministic"].is_null());
+    assert!(malformed_wire["cartridge"].is_null());
+    assert!(malformed_wire["evidence"].is_null());
+    assert_eq!(malformed_wire["error"]["stage"], "static_validation");
+    assert!(
+        malformed_wire["error"]["message"]
+            .as_str()
+            .is_some_and(|message| !message.is_empty())
+    );
+    assert_eq!(
+        malformed_wire
+            .as_object()
+            .expect("dynamic error report object")
+            .len(),
+        10
+    );
+
+    let invalid_media = directory.path().join("invalid-media.wasm");
+    let invalid_media_bytes = game_module(
+        &[(CORE, "indexed2d_version", 0), (CORE, "submit_render", 1)],
+        1,
+        &[
+            0x10, 0x00, 0x1a, 0x41, 0x00, 0x41, 0x03, 0x10, 0x01, 0x1a, 0x41, 0x00, 0x0b,
+        ],
+        b"bad",
+    );
+    std::fs::write(&invalid_media, invalid_media_bytes).expect("write invalid media cartridge");
+    let media_output = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["cartridge", "check"])
+        .arg(&invalid_media)
+        .arg("--json")
+        .output()
+        .expect("report invalid media cartridge");
+    assert!(!media_output.status.success());
+    assert!(media_output.stderr.is_empty());
+    let media_wire: serde_json::Value =
+        serde_json::from_slice(&media_output.stdout).expect("decode media error report");
+    assert_eq!(media_wire["static_valid"], true);
+    assert_eq!(media_wire["dynamic_valid"], false);
+    assert!(media_wire["deterministic"].is_null());
+    assert_eq!(media_wire["cartridge"]["game_id"], "test.game");
+    assert!(media_wire["evidence"].is_null());
+    assert_eq!(media_wire["error"]["stage"], "initial_media");
+
+    let nondeterministic = directory.path().join("nondeterministic.wasm");
+    std::fs::write(&nondeterministic, nondeterministic_converter_cartridge())
+        .expect("write nondeterministic cartridge");
+    let determinism_output = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["cartridge", "check"])
+        .arg(&nondeterministic)
+        .arg("--json")
+        .output()
+        .expect("report nondeterministic cartridge");
+    assert!(!determinism_output.status.success());
+    assert!(determinism_output.stderr.is_empty());
+    let determinism_wire: serde_json::Value = serde_json::from_slice(&determinism_output.stdout)
+        .expect("decode determinism error report");
+    assert_eq!(determinism_wire["static_valid"], true);
+    assert_eq!(determinism_wire["dynamic_valid"], false);
+    assert_eq!(determinism_wire["deterministic"], false);
+    assert_eq!(
+        determinism_wire["cartridge"]["game_id"],
+        "test.nondeterministic"
+    );
+    assert!(determinism_wire["evidence"].is_null());
+    assert_eq!(determinism_wire["error"]["stage"], "determinism");
+    assert_eq!(
+        determinism_wire["error"]["message"],
+        "suspend/resume replay is not byte-deterministic"
     );
 }
 

@@ -390,4 +390,21 @@ fn converter_cli_accepts_the_real_paddle_guard_cartridge() {
     assert!(stdout.contains("render_stream=tinyarcade:indexed2d/v1"));
     assert!(stdout.contains("initial_render_bytes=19248"));
     assert!(stdout.contains("OK: private-import converter conformance v1"));
+
+    let json = Command::new(env!("CARGO_BIN_EXE_tinyvm"))
+        .args(["cartridge", "check"])
+        .arg(&path)
+        .arg("--json")
+        .output()
+        .expect("run JSON converter conformance command");
+    assert!(json.status.success());
+    assert!(json.stderr.is_empty());
+    let wire: serde_json::Value =
+        serde_json::from_slice(&json.stdout).expect("decode indexed2d conformance JSON");
+    assert_eq!(wire["valid"], true);
+    assert_eq!(wire["deterministic"], true);
+    assert_eq!(wire["evidence"]["render_stream"], "tinyarcade:indexed2d/v1");
+    assert_eq!(wire["evidence"]["initial_render_bytes"], 19_248);
+    assert!(wire["evidence"]["application_metadata_schema"].is_null());
+    assert_eq!(wire["evidence"]["application_metadata_bytes"], 0);
 }

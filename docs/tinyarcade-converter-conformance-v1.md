@@ -24,6 +24,9 @@ cargo run -p agenterm-tinyvm --bin tinyvm -- \
   cartridge check path/to/game.wasm
 
 cargo run -p agenterm-tinyvm --bin tinyvm -- \
+  cartridge check path/to/game.wasm --json
+
+cargo run -p agenterm-tinyvm --bin tinyvm -- \
   cartridge check-profile path/to/game.wasm path/to/app-build.tahost
 
 cargo run -p agenterm-tinyvm --bin tinyvm -- \
@@ -47,6 +50,14 @@ an indexed2d metadata trailer reports its non-zero schema as eight lowercase
 hex digits and its validated length. Tools may display those values or route a
 known game-owned schema, but must not reinterpret the opaque payload as a
 TinyArcade-global state format.
+
+The optional trailing `--json` emits the versioned
+[`tinyarcade-cartridge-conformance-report` v1](tinyarcade-cartridge-conformance-report-v1.md).
+It includes the exact converter limits and deterministic execution statistics
+for init, both tick paths, suspend, fresh-instance init and resume. Static,
+initialization, media, lifecycle and byte-determinism failures remain distinct
+machine-readable stages. Catalog publication calls this same structured gate;
+it does not maintain a weaker duplicate implementation.
 
 `check-profile` targets one exact app-build TAH1. It does not execute the
 cartridge. Success reports zero compatibility issues; failure enumerates each
@@ -201,6 +212,7 @@ policy and the signed catalog record.
 The normative wire details remain in:
 
 - `docs/tinyarcade-cartridge-abi-v1.md`
+- `docs/tinyarcade-cartridge-conformance-report-v1.md`
 - `docs/tinyarcade-host-compatibility-report-v1.md`
 - `docs/tinyarcade-media-stream-v1.md`
 - `docs/tinyarcade-signed-catalog-v1.md`
