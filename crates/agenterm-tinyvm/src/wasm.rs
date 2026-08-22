@@ -2666,7 +2666,10 @@ enum ElemMode {
 struct ElemSegment {
     mode: ElemMode,
     element_type: ValueType,
-    refs: Vec<Val>,
+    /// The reference-valued subset of the standard constant-expression
+    /// instruction representation. Reusing `ConstOp` avoids a second owned
+    /// expression type in the size-constrained static core.
+    refs: Vec<ConstOp>,
 }
 
 fn parse_elem_section(
@@ -2798,7 +2801,7 @@ fn parse_elem_section(
             if flag < 4 {
                 let (function, next) = leb_u32(p, i)?;
                 i = next;
-                refs.push(Val::FuncRef(Some(function as usize)));
+                refs.push(ConstOp::Value(Val::FuncRef(Some(function as usize))));
             } else {
                 let (value, next) = parse_const_expr(p, i, budget, globals)?;
                 i = next;
@@ -2806,7 +2809,10 @@ fn parse_elem_section(
                     return Err(WasmError::Decode("element expression type mismatch"));
                 }
                 let reference = match value.ops.as_slice() {
-                    [ConstOp::Value(value @ (Val::FuncRef(_) | Val::ExternRef(_)))] => *value,
+                    [ConstOp::Value(value @ (Val::FuncRef(_) | Val::ExternRef(_)))] => {
+                        ConstOp::Value(*value)
+                    }
+                    [ConstOp::GlobalGet(index)] => ConstOp::GlobalGet(*index),
                     _ => return Err(WasmError::Decode("element const expression")),
                 };
                 refs.push(reference);
@@ -3022,6 +3028,16 @@ fn static_const_value(expr: &ConstExpr) -> Result<Option<Val>, WasmError> {
         Ok(None)
     } else {
         eval_const_expr(expr, &[]).map(Some)
+    }
+}
+
+fn eval_elem_expr(expr: ConstOp, globals: &[GlobalSlot]) -> Result<Val, WasmError> {
+    match expr {
+        ConstOp::Value(value) => Ok(value),
+        // Decoding already proved this is an immutable imported-global index,
+        // and instance globals preserve the module's combined index space.
+        ConstOp::GlobalGet(index) => Ok(globals[index as usize].get()),
+        _ => Err(WasmError::Trap("element const expression")),
     }
 }
 
@@ -4447,7 +4463,7 @@ impl Module {
         }
         for segment in &elems {
             for function in segment.refs.iter().filter_map(|value| match value {
-                Val::FuncRef(Some(function)) => Some(*function),
+                ConstOp::Value(Val::FuncRef(Some(function))) => Some(*function),
                 _ => None,
             }) {
                 let declared = declared_refs
@@ -4573,7 +4589,7 @@ impl Module {
                 .refs
                 .iter()
                 .filter_map(|value| match value {
-                    Val::FuncRef(Some(function)) => Some(*function),
+                    ConstOp::Value(Val::FuncRef(Some(function))) => Some(*function),
                     _ => None,
                 })
                 .any(|index| index >= function_count)
@@ -5596,9 +5612,9 @@ impl Module {
                     .checked_add(segment.refs.len())
                     .filter(|&end| end <= table.len())
                     .ok_or(WasmError::Trap("elem segment runs past table bounds"))?;
-                for (relative, &value) in segment.refs.iter().enumerate() {
+                for (relative, expression) in segment.refs.iter().enumerate() {
                     let value = table_element_from_instance_value(
-                        value,
+                        eval_elem_expr(*expression, globals)?,
                         segment.element_type,
                         store,
                         instance_id,
@@ -6919,9 +6935,9 @@ impl Module {
                         .ok_or(WasmError::Trap("table.init table index"))?;
                     bulk_memory_range(table.len(), destination, len)?;
                     charge_bulk_elements(steps, len, self.limits.max_steps)?;
-                    for (relative, &value) in refs[source_range].iter().enumerate() {
+                    for (relative, expression) in refs[source_range].iter().enumerate() {
                         let value = table_element_from_instance_value(
-                            value,
+                            eval_elem_expr(*expression, globals)?,
                             segment.element_type,
                             bulk.store,
                             bulk.instance_id,

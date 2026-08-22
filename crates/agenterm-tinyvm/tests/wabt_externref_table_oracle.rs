@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use agenterm_tinyvm::{Val, ValueType, WasmError, WasmExternReference, WasmModule, WasmStore};
+use agenterm_tinyvm::{
+    Val, ValueType, WasmError, WasmExternReference, WasmGlobal, WasmModule, WasmStore,
+};
 
 fn must_ok<T>(value: Result<T, WasmError>, context: &str) -> T {
     value.unwrap_or_else(|error| panic!("{context}: {}", error.message()))
@@ -110,4 +112,45 @@ fn wabt_compiled_externref_tables_preserve_host_identity() {
         shared.set(0, Val::FuncRef(None)),
         Err(WasmError::Trap("table element type"))
     ));
+}
+
+#[test]
+#[ignore = "run through smoke-wabt-externref-table.sh with an independently compiled fixture"]
+fn wabt_element_expressions_preserve_imported_externref() {
+    let path = std::env::var_os("TINYVM_ELEMENT_GLOBAL_WASM")
+        .map(PathBuf::from)
+        .expect("TINYVM_ELEMENT_GLOBAL_WASM is set by the smoke script");
+    let bytes = std::fs::read(path).expect("read independently compiled element-global fixture");
+    let seed = must_ok(WasmExternReference::new(), "allocate element seed");
+    let global = WasmGlobal::new(Val::ExternRef(Some(seed)), false);
+
+    let unbound = must_ok(WasmModule::from_bytes(&bytes), "load unbound fixture");
+    assert!(matches!(
+        unbound.instantiate(),
+        Err(WasmError::Trap("unbound imported global"))
+    ));
+
+    let mut module = must_ok(
+        WasmModule::from_bytes(&bytes),
+        "load element-global fixture",
+    );
+    must_ok(
+        module.bind_global_import("host", "seed", &global),
+        "bind immutable externref global",
+    );
+    let mut instance = must_ok(module.instantiate(), "instantiate element-global fixture");
+    let table = must_ok(instance.exported_table_handle("refs"), "export refs table")
+        .expect("refs table export");
+
+    assert!(table.get(0) == Ok(Some(Val::ExternRef(Some(seed)))));
+    assert!(table.is_null(1) == Ok(Some(true)));
+    assert!(matches!(
+        global.set(Val::ExternRef(None)),
+        Err(WasmError::Trap("global binding type"))
+    ));
+    must_ok(
+        instance.invoke_by_name("install_passive", &[]),
+        "install passive imported-global value",
+    );
+    assert!(table.get(1) == Ok(Some(Val::ExternRef(Some(seed)))));
 }

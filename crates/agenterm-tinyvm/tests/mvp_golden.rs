@@ -638,7 +638,7 @@ fn parse_prd_x_leaves(prd: &str) -> Vec<String> {
 /// test must exist in this package's integration tests and assert something
 /// concrete — the point of naming it here is that a leaf can no longer be
 /// satisfied by a text row.
-const LEAF_TESTS: [(&str, &str); 143] = [
+const LEAF_TESTS: [(&str, &str); 144] = [
     ("eval(bytes)", "eval_bytes"),
     ("iOS runtime boundary", "native_interpreter_boundary"),
     ("interpret wasm", "eval_bytes"),
@@ -693,6 +693,10 @@ const LEAF_TESTS: [(&str, &str); 143] = [
     (
         "export-declared ref.func",
         "standard_ref_func_declarations_include_function_exports",
+    ),
+    (
+        "imported-global element expressions",
+        "wabt_element_expressions_preserve_imported_externref",
     ),
     (
         "WABT load-gate oracle",

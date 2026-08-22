@@ -2844,3 +2844,19 @@ in an element segment. A function export also declares its target for
 validating any body or constant expression; the declaration is independent of
 section order. Keep one exported target, one element-declared target and one
 otherwise undeclared rejection in the independent validator corpus.
+
+## Element expressions may depend on an instance global
+
+An element expression may read an immutable imported reference global. Keeping
+only decoded `Val` entries in the module therefore rejects valid standard
+modules. Decode element entries with the reference-valued subset of the same
+constant-instruction representation used by globals.
+
+TinyVM canonicalizes each imported reference into the instance's `GlobalSlot`,
+and both host and guest setters reject writes when the descriptor is immutable.
+Active initialization and a later passive `table.init` can therefore evaluate
+`global.get` against that instance slot without a duplicate reference arena:
+the value and identity cannot change after instantiation, so the result is
+observationally identical to eager evaluation. Keep only passive-segment
+liveness as extra instance state. Test active and passive identity together,
+plus the immutable host-write rejection that makes this compact model sound.

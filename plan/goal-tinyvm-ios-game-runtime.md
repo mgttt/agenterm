@@ -4393,3 +4393,31 @@ journey and an arm64 device Release build. App Store Connect status remains
 unverified because no controllable signed-in browser is currently available;
 physical-iPhone lifecycle and TestFlight install/play evidence remain open, so
 the persistent goal stays active.
+
+## One-hundred-forty-second executable increment — imported-global element expressions
+
+The reference-types decoder now accepts standard active, passive and
+declarative element expressions that read an immutable imported reference
+global. It reuses the existing constant-instruction representation instead of
+introducing an engine-private element format. Active initialization and later
+`table.init` both resolve the expression through the instance's canonicalized
+global slot; immutable host and guest setters remain rejected, so reference
+identity cannot drift after instantiation and no duplicate per-instance arena
+is required. Mutable imported globals remain a load error.
+
+Evidence on 2026-08-22: an independently WABT-compiled externref fixture binds
+one host token, proves the active slot, the initially empty passive destination,
+immutable host-write rejection and the later passive slot all preserve that
+exact identity. WABT agrees with all 37 rejected and 14 accepted load-gate
+modules. The 144-claim executable PRD map, complete all-feature suite,
+warnings-denied Clippy, rustfmt, ten-family WABT/JSC standard matrix,
+four-cartridge tinyvm/JSC/H5 differential, iOS WASI container smoke and the
+unchanged 101,256-byte stripped static core pass. Default iOS consumers link at
+1,797,640 bytes arm64 and 1,895,176 bytes x86_64; opt-in SIMD consumers link at
+1,798,616 / 1,899,200 bytes, all inside the existing finite ceilings. The real
+Nostalgia Arcade consumer rebuilds the exact archive (SHA-256
+`edb6fdf23aac5ac1bf362f750958ef7492eee1945367f474156adaadcc00b195`),
+passes eight Depth Well tests, five Signal Lock tests, the two-cartridge UI
+journey and an arm64 device Release build. Physical-iPhone lifecycle and
+TestFlight install/play evidence remain open, so the persistent goal stays
+active.

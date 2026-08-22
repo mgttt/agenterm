@@ -14,7 +14,7 @@ use agenterm_tinyvm::{WasmError, WasmModule, eval};
 use std::process::Command;
 
 /// Modules WASM 1.0 validation rejects: `(name, wasm_hex)`.
-const REJECTED: [(&str, &str); 36] = [
+const REJECTED: [(&str, &str); 37] = [
     (
         "empty_stack_add",
         "0061736d010000000105016000017f03020100070801046d61696e00000a050103006a0b",
@@ -58,6 +58,10 @@ const REJECTED: [(&str, &str); 36] = [
     (
         "ref_func_without_declaration",
         "0061736d01000000010802600000600001700303020001070801046d61696e00010a090202000b0400d2000b",
+    ),
+    (
+        "mutable_global_in_element_expression",
+        "0061736d01000000020e0104686f73740473656564036f010404016f0001090701056f0123000b",
     ),
     (
         "body_without_end",
