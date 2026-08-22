@@ -296,9 +296,15 @@ App adapter decodes its 64-byte state from the same completed frame, so its
 30 Hz render path remains a `.tick` lifecycle and does not allocate a portable
 snapshot or call `game_suspend` merely to update native UI/accessibility state.
 The C boundary still performs one required copy into Swift-owned immutable
-`Data`. `withPixelBytes` and `withApplicationMetadataBytes` then lend scoped,
-read-only views into that owner for native decoding and RGBA conversion; their
-pointers cannot escape the closure. The zero-indexed `pixels` and
+`Data`. The runtime retains one render and one audio `Data` buffer: when no
+older frame survives, the next same-sized copy reuses its allocation; when UI
+code retains an older frame, Swift copy-on-write separates the next output so
+the old value cannot change. A failed tick clears both logical outputs while
+retaining bounded capacity for recovery, and `close()` releases them. No Rust
+pointer crosses the copy call. `withPixelBytes` and
+`withApplicationMetadataBytes` then lend scoped, read-only views into that
+owner for native decoding and RGBA conversion; their pointers cannot escape
+the closure. The zero-indexed `pixels` and
 `applicationMetadata` properties remain source-compatible value snapshots and
 copy only when a caller explicitly asks for them. The palette follows the same
 ownership rule: `paletteCount` is allocation-free, `withPaletteBytes` lends the

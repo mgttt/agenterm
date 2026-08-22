@@ -850,12 +850,7 @@ struct TinyArcadeSmoke {
         precondition(providerData as Data == expectedRGBA)
         let view = TinyArcadeIndexed2DView(frame: CGRect(x: 0, y: 0, width: 320, height: 240))
         try view.display(indexedFrame)
-        precondition(view.bitmapStorageGeneration == 1)
         try view.display(indexedFrame)
-        precondition(
-            view.bitmapStorageGeneration == 1,
-            "same-sized indexed frames must reuse the presentation buffer"
-        )
         let changedMedia = try nativeRuntime.tickMedia(buttons: 0, clockMilliseconds: 1)
         guard case let .indexed2D(changedFrame) = changedMedia.renderFrame else {
             preconditionFailure("changed native frame should remain indexed2d")
@@ -866,10 +861,6 @@ struct TinyArcadeSmoke {
         }
         precondition(changedRGBA == Data([255, 0, 0, 255, 255, 0, 0, 255]))
         try view.display(changedFrame)
-        precondition(
-            view.bitmapStorageGeneration == 1,
-            "changed same-sized frames must reuse the presentation buffer"
-        )
         precondition(view.layer.contents != nil)
         precondition(view.layer.contentsGravity == .resizeAspect)
         precondition(view.layer.magnificationFilter == .nearest)
@@ -933,10 +924,6 @@ struct TinyArcadeSmoke {
         let renderIterations = 120
         let renderStart = ProcessInfo.processInfo.systemUptime
         for _ in 0..<renderIterations { try classicView.display(classicFrame) }
-        precondition(
-            classicView.bitmapStorageGeneration == 1,
-            "the classic presentation loop must allocate its bitmap storage once"
-        )
         let renderAverageMilliseconds = (
             ProcessInfo.processInfo.systemUptime - renderStart
         ) * 1_000 / Double(renderIterations)

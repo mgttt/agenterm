@@ -647,8 +647,11 @@ public final class TinyArcadeIndexed2DView: UIView {
     private var bitmapStorage: NSMutableData?
     private var bitmapContext: CGContext?
     private var bitmapDimensions: (width: Int, height: Int)?
-    #if TINYARCADE_TEST_HOOKS
-    private(set) var bitmapStorageGeneration: UInt64 = 0
+    #if TINYARCADE_OUTPUT_REUSE_TEST_HOOKS
+    var bitmapStorageAddress: UInt {
+        guard let bitmapStorage else { return 0 }
+        return UInt(bitPattern: bitmapStorage.mutableBytes)
+    }
     #endif
 
     public override init(frame: CGRect) {
@@ -717,9 +720,6 @@ public final class TinyArcadeIndexed2DView: UIView {
         bitmapStorage = storage
         bitmapContext = context
         bitmapDimensions = (width, height)
-        #if TINYARCADE_TEST_HOOKS
-        bitmapStorageGeneration = bitmapStorageGeneration &+ 1
-        #endif
     }
 }
 
@@ -2822,6 +2822,8 @@ public final class TinyArcadeRuntimeV1 {
     private var handle: OpaquePointer?
     private var nativeCallbackBoxes: [TinyArcadeNativeCallbackBox] = []
     private var completionChannels: [TinyArcadeCompletionV1] = []
+    private var renderBuffer = Data()
+    private var audioBuffer = Data()
 
     public init(
         cartridge: Data,
@@ -2936,6 +2938,8 @@ public final class TinyArcadeRuntimeV1 {
         self.handle = nil
         nativeCallbackBoxes.removeAll()
         completionChannels.removeAll()
+        renderBuffer = Data()
+        audioBuffer = Data()
     }
 
     public func tick(buttons: UInt32, clockMilliseconds: UInt32) throws -> TinyArcadeFrame {
@@ -2993,11 +2997,17 @@ public final class TinyArcadeRuntimeV1 {
         buttons: UInt32,
         clockMilliseconds: UInt32
     ) throws -> (render: Data, audio: Data) {
-        let handle = try liveHandle()
-        try Self.check(tinyarcade_v1_tick(handle, buttons, clockMilliseconds))
-        let render = try copy(handle, tinyarcade_v1_copy_render)
-        let audio = try copy(handle, tinyarcade_v1_copy_audio)
-        return (render, audio)
+        do {
+            let handle = try liveHandle()
+            try Self.check(tinyarcade_v1_tick(handle, buttons, clockMilliseconds))
+            try Self.copy(handle, tinyarcade_v1_copy_render, into: &renderBuffer)
+            try Self.copy(handle, tinyarcade_v1_copy_audio, into: &audioBuffer)
+            return (renderBuffer, audioBuffer)
+        } catch {
+            renderBuffer.removeAll(keepingCapacity: true)
+            audioBuffer.removeAll(keepingCapacity: true)
+            throw error
+        }
     }
 
     public func suspend() throws -> Data {
@@ -3104,17 +3114,29 @@ public final class TinyArcadeRuntimeV1 {
     ) -> tinyarcade_status_v1
 
     private func copy(_ handle: OpaquePointer, _ function: CopyFunction) throws -> Data {
+        var data = Data()
+        try Self.copy(handle, function, into: &data)
+        return data
+    }
+
+    private static func copy(
+        _ handle: OpaquePointer,
+        _ function: CopyFunction,
+        into data: inout Data
+    ) throws {
         var count = 0
         let query = function(handle, nil, 0, &count)
         if count == 0 {
             try Self.check(query)
-            return Data()
+            data.removeAll(keepingCapacity: true)
+            return
         }
         guard query == TINYARCADE_BUFFER_TOO_SMALL else {
             try Self.check(query)
-            return Data()
+            data.removeAll(keepingCapacity: true)
+            return
         }
-        var data = Data(count: count)
+        data.count = count
         let status = data.withUnsafeMutableBytes { bytes in
             function(
                 handle,
@@ -3129,7 +3151,6 @@ public final class TinyArcadeRuntimeV1 {
             expected: data.count,
             context: "runtime output"
         )
-        return data
     }
 
     private func string(handle: OpaquePointer, copyFunction: CopyFunction) throws -> String {

@@ -66,13 +66,30 @@ private struct TinyArcadeGameSessionSmoke {
         let launch = try session.tick(
             elapsedMilliseconds: gameplayPacer.elapsedMilliseconds(at: 20)
         )
-        guard case .indexed2D = launch.renderFrame else {
+        guard case let .indexed2D(launchFrame) = launch.renderFrame else {
             preconditionFailure("Paddle Guard must render indexed2d")
         }
+        let indexedView = TinyArcadeIndexed2DView(frame: .zero)
+        try indexedView.display(launchFrame)
+        let indexedStorageAddress = indexedView.bitmapStorageAddress
+        precondition(indexedStorageAddress != 0)
+        for _ in 0..<120 { try indexedView.display(launchFrame) }
+        precondition(
+            indexedView.bitmapStorageAddress == indexedStorageAddress,
+            "repeated same-sized frames must reuse indexed presentation storage"
+        )
         try session.setButtons([], forSource: 1)
         precondition(session.input.buttons == .right)
-        _ = try session.tick(
+        let moved = try session.tick(
             elapsedMilliseconds: gameplayPacer.elapsedMilliseconds(at: 20.015625)
+        )
+        guard case let .indexed2D(movedFrame) = moved.renderFrame else {
+            preconditionFailure("moved Paddle Guard frame must remain indexed2d")
+        }
+        try indexedView.display(movedFrame)
+        precondition(
+            indexedView.bitmapStorageAddress == indexedStorageAddress,
+            "changed same-sized frames must reuse indexed presentation storage"
         )
         precondition(session.gameClockMilliseconds == 15)
         try session.deactivateAndSave(to: store)
@@ -141,7 +158,26 @@ private struct TinyArcadeGameSessionSmoke {
                 precondition(error.status == Int32(TINYARCADE_INVALID_ARGUMENT.rawValue))
             }
         }
-        _ = try direct.tickMedia(buttons: 0, clockMilliseconds: 100)
+        let retainedFrame = try direct.tickMedia(buttons: 0, clockMilliseconds: 100)
+        let retainedRender = retainedFrame.render
+        let retainedAddress = retainedRender.withUnsafeBytes {
+            UInt(bitPattern: $0.baseAddress!)
+        }
+        func ephemeralRenderAddress(clock: UInt32) throws -> UInt {
+            let ephemeral = try direct.tickMedia(buttons: 0, clockMilliseconds: clock)
+            return ephemeral.render.withUnsafeBytes { UInt(bitPattern: $0.baseAddress!) }
+        }
+        let detachedAddress = try ephemeralRenderAddress(clock: 101)
+        precondition(
+            detachedAddress != retainedAddress,
+            "a retained old frame must force copy-on-write output separation"
+        )
+        precondition(retainedFrame.render == retainedRender)
+        let reusedAddress = try ephemeralRenderAddress(clock: 102)
+        precondition(
+            reusedAddress == detachedAddress,
+            "released same-sized frame storage should be reused by the next tick"
+        )
         try direct.close()
 
         let exhausted = try TinyArcadeGameSessionV1(

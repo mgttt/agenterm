@@ -42,7 +42,10 @@ not authorize a different native module or resource limit in the App.
 
 Use `tickMedia` for the discriminated `grid3d/v1` or `indexed2d/v1` render
 frame. Existing Depth Well integrations may keep using the `grid3d/v1`-only
-`tick` convenience.
+`tick` convenience. The runtime recycles its Swift render/audio output storage
+when the previous frame has been released. Retaining an older frame remains
+safe: Swift copy-on-write separates the next output rather than mutating the
+retained value.
 
 For 3D cartridges, render with `TinyArcadeGrid3DFrame.forEachCell`. It walks
 typed, validated cell values directly over the frame's immutable storage and

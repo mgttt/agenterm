@@ -4711,3 +4711,28 @@ Nostalgia Arcade consumer passes 13 cartridge unit tests, its two-game UI
 journey (including live Signal Lock display) and an arm64 device Release build
 with the exact current ABI v1.13 archive. Physical-device and TestFlight
 evidence remain open, so the persistent goal stays active.
+
+## One-hundred-fifty-second executable increment — copy-on-write Swift outputs
+
+`TinyArcadeRuntimeV1` now retains bounded render and audio `Data` buffers across
+ticks instead of constructing both from empty storage every frame. The C ABI
+still performs its required owned copy and never lends Rust memory. Swift value
+semantics remain authoritative: if an old `TinyArcadeMediaFrame` is retained,
+the next mutable copy detaches through copy-on-write and the old bytes stay
+unchanged; after the transient frame is released, the following same-sized
+tick reuses the detached allocation. Any failed tick clears both logical
+outputs while retaining their bounded capacity, and `close()` releases it.
+
+A booted iOS Simulator GameSession black box proves retained-frame separation,
+byte stability and pointer reuse across two released same-sized Paddle Guard
+frames. The full lifecycle suite still drives Depth Well and Paddle Guard for
+600 frames, with indexed2d presentation averaging 0.118 ms. Default consumers
+link at 1,799,816 bytes arm64 and 1,909,536 bytes x86_64; the opt-in SIMD pair
+links at 1,818,568 / 1,922,120 bytes. All remain inside the existing finite
+ceilings without another graduation. The complete standard-feature matrix and
+its WABT/JavaScriptCore/H5 development oracles pass; an independently booted
+iOS Simulator also executes the optional SIMD cartridge through the Swift/C
+ABI. The real Nostalgia Arcade consumer passes 13 cartridge unit tests, its
+two-game UI journey and an arm64 device Release build with the byte-identical
+ABI v1.13 archive. Physical-iPhone lifecycle/performance/audio and TestFlight
+install/play evidence remain open, so the persistent goal stays active.

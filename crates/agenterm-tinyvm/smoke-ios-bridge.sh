@@ -28,6 +28,12 @@ if grep -Fq 'public let paletteRGBA: [UInt32]' \
 fi
 grep -Fq 'var rgba = Data(count: pixels.count * 4)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'private var renderBuffer = Data()' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'private var audioBuffer = Data()' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
+grep -Fq 'try Self.copy(handle, tinyarcade_v1_copy_render, into: &renderBuffer)' \
+  "$CRATE/bindings/swift/TinyArcadeRuntime.swift"
 if grep -Fq 'bytes.reserveCapacity(pixels.count * 4)' \
   "$CRATE/bindings/swift/TinyArcadeRuntime.swift"; then
   echo "indexed2d RGBA expansion must not allocate an Array before Data" >&2
@@ -230,6 +236,7 @@ xcrun --sdk iphonesimulator swiftc \
 xcrun --sdk iphonesimulator swiftc \
   -parse-as-library \
   -D TINYARCADE_EXTERNAL_CARTRIDGES \
+  -D TINYARCADE_OUTPUT_REUSE_TEST_HOOKS \
   -warnings-as-errors \
   -O \
   -target arm64-apple-ios14.0-simulator \
