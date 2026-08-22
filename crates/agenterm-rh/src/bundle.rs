@@ -352,7 +352,14 @@ fn prefix_local_fns(
             while previous > 0 && bytes[previous - 1].is_ascii_whitespace() {
                 previous -= 1;
             }
-            let is_method_or_qualified = previous > 0 && matches!(bytes[previous - 1], b'.' | b':');
+            // `obj.method(` and `mod::name(` are already spoken for. A single
+            // colon is not a path: it separates a map entry's key from its
+            // value, so treating it as one left a module calling its own
+            // function by a name that renaming had just taken away.
+            let after_dot = previous > 0 && bytes[previous - 1] == b'.';
+            let after_path =
+                previous > 1 && bytes[previous - 1] == b':' && bytes[previous - 2] == b':';
+            let is_method_or_qualified = after_dot || after_path;
             if local_fns.contains(ident) && (is_def || (is_call && !is_method_or_qualified)) {
                 out.push_str(&mangled_name(alias, ident));
             } else {
@@ -497,6 +504,35 @@ mod tests {
     use super::bundle_project_source;
     use std::fs;
     use std::path::PathBuf;
+
+    /// A module function called in map-value position keeps its own name.
+    ///
+    /// The renamer skipped any identifier whose preceding character was `:`,
+    /// meaning to skip `mod::name`. A map entry reads `key: value`, so a
+    /// module calling one of its own functions as a map value was left
+    /// calling the old name after the definition had been renamed -- and the
+    /// bundled source referred to a function that no longer existed.
+    #[test]
+    fn prefixes_a_call_used_as_a_map_value() {
+        let dir = tempfile::tempdir().expect("temp");
+        let root = dir.path();
+        fs::create_dir_all(root.join("lib")).expect("lib");
+        fs::write(
+            root.join("lib/m.rh"),
+            "fn shorten(text) { text }\nfn record(text) { #{ output: shorten(text) } }\n",
+        )
+        .expect("m");
+        let source = r#"
+import "lib/m" as m;
+fn entry() { m::record("x"); 0 }
+"#;
+        let bundled = bundle_project_source(root, source).expect("bundle");
+        assert!(bundled.contains("fn m__shorten("), "{bundled}");
+        assert!(
+            bundled.contains("output: m__shorten(text)"),
+            "the call in map-value position kept its bare name: {bundled}"
+        );
+    }
 
     #[test]
     fn bundles_single_hop_import_into_prefixed_calls() {
